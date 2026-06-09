@@ -221,6 +221,12 @@ const FLAGS = {
 const seedLikeTeam=t=>/^\d+/.test(String(t||''));
 const displayTeam=t=>seedLikeTeam(t)?'A Definir':t;
 const fl = t => displayTeam(t)==='A Definir' ? '\u{1F3DF}\uFE0F' : (FLAGS[displayTeam(t)] || '\u{1F3F3}\uFE0F');
+const twemojiFlagUrl=t=>{
+  const emoji=fl(t);
+  if(!emoji||displayTeam(t)==='A Definir') return '';
+  const code=Array.from(emoji).map(ch=>ch.codePointAt(0).toString(16)).join('-');
+  return `https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/svg/${code}.svg`;
+};
 const ALL_TEAMS = Object.keys(FLAGS).sort();
 const PHASES = ['Grupos','32-avos','Oitavas','Quartas','Semis','3º Lugar','Final'];
 const GROUPS = ['A','B','C','D','E','F','G','H','I','J','K','L'];
@@ -1319,6 +1325,12 @@ function Bolao(){
       <div style={{fontSize:9,color:T.txt3,marginTop:5,textTransform:'uppercase',letterSpacing:.6,fontWeight:900}}>{label}</div>
     </div>
   );
+  const FlagMark=({team,align='left'})=>{
+    const label=displayTeam(team);
+    const url=twemojiFlagUrl(team);
+    if(label==='A Definir') return <span style={{fontSize:34,lineHeight:1}}>???</span>;
+    return <span title={label} style={{width:58,height:40,borderRadius:10,border:'1px solid '+T.border,boxShadow:'0 10px 22px rgba(15,23,42,.12)',background:'#fff',display:'inline-flex',alignItems:'center',justifyContent:'center',alignSelf:align==='right'?'flex-end':'flex-start',position:'relative',overflow:'hidden'}}><span style={{fontSize:22,fontWeight:950,color:T.txt1,lineHeight:1}}>{fl(team)}</span>{url&&<img src={url} alt={label} loading="lazy" style={{position:'absolute',inset:0,width:'100%',height:'100%',objectFit:'cover',background:'#fff'}} onError={e=>{e.currentTarget.style.display='none';}}/>}</span>;
+  };
   const GroupStandingCard=({group})=>(
     <div style={{border:'1px solid '+T.border,borderRadius:8,overflow:'hidden',background:'#fff'}}>
       <div style={{background:'#00732E',color:'#fff',display:'flex',alignItems:'center',padding:'8px 12px'}}>
@@ -1387,7 +1399,7 @@ function Bolao(){
         </div>
         <div style={{display:'flex',alignItems:'center',padding:'16px 14px 12px'}}>
           <div style={{flex:1,display:'flex',flexDirection:'column',alignItems:'flex-start',gap:4}}>
-            <span style={{fontSize:40,lineHeight:1}}>{fl(m.home)}</span>
+            <FlagMark team={m.home}/>
             <span style={{fontSize:12,fontWeight:700,color:T.txt1,maxWidth:90,lineHeight:1.3,marginTop:2}}>{displayTeam(m.home)}</span>
           </div>
           <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:6,padding:'0 8px',minWidth:130}}>
@@ -1417,7 +1429,7 @@ function Bolao(){
             {!hasR&&<span style={{fontSize:10,color:T.txt3}}>📍 {m.venue}</span>}
           </div>
           <div style={{flex:1,display:'flex',flexDirection:'column',alignItems:'flex-end',gap:4}}>
-            <span style={{fontSize:40,lineHeight:1}}>{fl(m.away)}</span>
+            <FlagMark team={m.away} align="right"/>
             <span style={{fontSize:12,fontWeight:700,color:T.txt1,maxWidth:90,lineHeight:1.3,textAlign:'right',marginTop:2}}>{displayTeam(m.away)}</span>
           </div>
         </div>
