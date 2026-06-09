@@ -847,13 +847,18 @@ function Bolao(){
     }
   };
   const saveResult=async(id)=>{
-    if(!isAdmin){showToast('Ação permitida só para admin.',false);return;}
+    if(!isAdmin){showToast('Acao permitida so para admin.',false);return;}
+    const m=matches.find(x=>x.id===id);
+    if(!m){showToast('Jogo nao encontrado.',false);return;}
     const res=ri[id]||{home:'',away:''};
     const home=parseScore(res.home),away=parseScore(res.away);
-    if(home===null||away===null){showToast('Resultado inválido (0 a 20).',false);return;}
+    if(home===null||away===null){showToast('Resultado invalido (0 a 20).',false);return;}
+    const previous=m.result&&m.result.home!==''&&m.result.home!==undefined?{home:m.result.home,away:m.result.away}:null;
+    const msg=(previous?'Alterar resultado de ':'Salvar resultado de ')+displayTeam(m.home)+' '+home+' x '+away+' '+displayTeam(m.away)+'?'+(previous?' Anterior: '+previous.home+' x '+previous.away+'.':'');
+    if(!window.confirm(msg)) return;
     try{
       await ref('matches/'+id+'/result').set({home,away});
-      await logAdminAction('save_result',{matchId:id,home,away});
+      await logAdminAction('save_result',{matchId:id,home,away,previous,match:displayTeam(m.home)+' x '+displayTeam(m.away)});
       showToast('Resultado salvo!');
     }catch{
       showToast('Erro ao salvar resultado.',false);
@@ -985,13 +990,49 @@ function Bolao(){
 
   const copyRanking=()=>{
     const lines=[
-      'Ranking do Nosso Bolão 2026',
-      ...board.slice(0,10).map((p,i)=>`${i+1}. ${p.name} - ${p.pts} pts (${p.exact} exatos, ${p.win} vencedores)`)
+      'Ranking do Nosso Bolao 2026',
+      ...board.slice(0,10).map((p,i)=>(i+1)+'. '+p.name+' - '+p.pts+' pts ('+p.exact+' exatos, '+p.win+' vencedores)')
     ];
     navigator.clipboard.writeText(lines.join('\n'))
       .then(()=>showToast('Ranking copiado!'))
-      .catch(()=>showToast('Não foi possível copiar.',false));
+      .catch(()=>showToast('Nao foi possivel copiar.',false));
   };
+
+  const csvCell=value=>{
+    const s=value===undefined||value===null?'':String(value);
+    const needsQuotes=s.includes('"')||s.includes(';')||s.includes('\n')||s.includes('\r');
+    return needsQuotes?'"'+s.replace(/"/g,'""')+'"':s;
+  };
+  const downloadTextFile=(filename,content,type='text/csv;charset=utf-8')=>{
+    try{
+      const blob=new Blob([content],{type});
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement('a');
+      a.href=url; a.download=filename; document.body.appendChild(a); a.click();
+      document.body.removeChild(a); URL.revokeObjectURL(url);
+      showToast('Arquivo baixado!');
+    }catch{
+      showToast('Nao foi possivel baixar o arquivo.',false);
+    }
+  };
+  const downloadCsv=(filename,rows)=>downloadTextFile(filename,rows.map(row=>row.map(csvCell).join(';')).join('\n'));
+  const exportRankingCsv=()=>downloadCsv('ranking-bolao.csv',[
+    ['posicao','participante','pontos','exatos','vencedor_empate','erros','pts_grupos','pts_eliminatorias','palpites_pontuados'],
+    ...board.map((p,i)=>[i+1,p.name,p.pts,p.exact,p.win,p.miss,p.groupPts,p.elimPts,p.total])
+  ]);
+  const exportPredictionsCsv=()=>downloadCsv('palpites-bolao.csv',[
+    ['participante','uid','jogo_id','fase','grupo','casa','fora','data','palpite_casa','palpite_fora','resultado_casa','resultado_fora','pontos'],
+    ...parts.flatMap(uid=>matches.map(m=>{
+      const p=(preds[uid]||{})[m.id]||{};
+      const pts=calcPts(p,m.result);
+      return [getName(uid),uid,m.id,m.ph,m.gr||'',displayTeam(m.home),displayTeam(m.away),m.dt,p.home??'',p.away??'',m.result?.home??'',m.result?.away??'',pts??''];
+    }))
+  ]);
+  const exportMatchesCsv=()=>downloadCsv('jogos-resultados-bolao.csv',[
+    ['jogo_id','fase','grupo','casa','fora','data','local','abre_em','fecha_em','resultado_casa','resultado_fora'],
+    ...matches.map(m=>[m.id,m.ph,m.gr||'',displayTeam(m.home),displayTeam(m.away),m.dt,m.venue||'',m.unlockAt||'',m.lockAt||'',m.result?.home??'',m.result?.away??''])
+  ]);
+  const exportBackupJson=()=>downloadTextFile('backup-bolao.json',JSON.stringify({exportedAt:new Date().toISOString(),root:REF_ROOT,matches,predictions:preds,participants:partMeta,admins:adminIds,champPreds,podiumPreds,bracketPreds,officialPodium,officialBracket,champWinner,audit},null,2),'application/json;charset=utf-8');
 
   const requestReminderPermission=async()=>{
     if(!('Notification' in window)){showToast('Seu navegador não suporta notificações.',false);return;}
@@ -1132,6 +1173,10 @@ function Bolao(){
   const urgentPendingAll=pendingMatches.filter(m=>canEditMatch(m));
   const urgentPending=urgentPendingAll.slice(0,4);
   const nextMatches=matches.filter(m=>!started(m.dt)).sort((a,b)=>new Date(a.dt)-new Date(b.dt)).slice(0,4);
+  const nextMatch=nextMatches[0]||null;
+  const nextUnlockMatch=matches.filter(m=>!predictionOpen(m)&&!matchLocked(m)).sort((a,b)=>unlockAt(a)-unlockAt(b))[0]||null;
+  const nextClosingMatch=matches.filter(m=>canEditMatch(m)).sort((a,b)=>new Date(a.dt)-new Date(b.dt))[0]||null;
+  const openToPickCount=groupAvailablePendingCount+knockoutAvailablePendingCount;
   const champDone=!!champPreds[me];
   const groupMatches=matches.filter(m=>m.ph==='Grupos');
   const savedGroupPredCount=groupMatches.filter(m=>myPredMap[m.id]&&myPredMap[m.id].home!=='').length;
@@ -1259,6 +1304,14 @@ function Bolao(){
     acc[item.meta.key]=(acc[item.meta.key]||0)+1;
     return acc;
   },{});
+  const matchBoards=scoredMatches.map(m=>({
+    match:m,
+    rows:[...parts].map(uid=>{
+      const pred=(preds[uid]||{})[m.id];
+      const pts=pred?calcPts(pred,m.result):null;
+      return {uid,name:getName(uid),pred,pts:pts??0,hasPred:!!pred,meta:scoreMeta(pts)};
+    }).filter(row=>row.hasPred).sort((a,b)=>b.pts-a.pts||a.name.localeCompare(b.name,'pt-BR'))
+  })).filter(item=>item.rows.length>0).sort((a,b)=>new Date(b.match.dt)-new Date(a.match.dt));
   const champPredCount=parts.filter(p=>champPreds[p]).length;
   const StatTile=({value,label,color=T.txt1,bg=T.bg})=>(
     <div className="mini-tile" style={{background:bg,border:`1px solid ${T.border}`,borderRadius:14,padding:'12px 10px',textAlign:'center',minHeight:62,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center'}}>
@@ -1514,6 +1567,26 @@ function Bolao(){
       <p style={{fontSize:15,color:T.txt2,marginBottom:28}}>Os jogos de cada dia liberam juntos, 2 dias antes do primeiro jogo do dia.</p>
       <div style={{display:'flex',justifyContent:'space-between',fontSize:13,color:T.txt3,marginBottom:8}}><span>{stageDoneCount} de 2 etapas concluídas</span><span>{Math.round(stageDoneCount/2*100)}%</span></div>
       <div style={{height:8,background:'#F1F5F9',borderRadius:999,overflow:'hidden',marginBottom:28}}><div style={{height:'100%',width:`${Math.round(stageDoneCount/2*100)}%`,background:'#009C3B',borderRadius:999}}/></div>
+      <div className="lux-card" style={{background:T.card,border:'1px solid '+T.border,borderRadius:18,padding:'16px',boxShadow:shadow,marginBottom:18}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,marginBottom:12,flexWrap:'wrap'}}>
+          <div>
+            <div style={{fontSize:11,fontWeight:950,color:T.txt3,textTransform:'uppercase',letterSpacing:.8}}>Status do bolao</div>
+            <div style={{fontSize:18,fontWeight:950,color:T.txt1,marginTop:2}}>{resultMatchCount?'Copa em andamento':'Aguardando inicio'}</div>
+          </div>
+          <span style={{fontSize:11,fontWeight:950,color:T.accent,background:T.accentLt,borderRadius:999,padding:'7px 10px'}}>{parts.length} participante{parts.length!==1?'s':''}</span>
+        </div>
+        <div className="info-grid" style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10,marginBottom:12}}>
+          <StatTile value={resultMatchCount+'/'+(matches.length||0)} label="resultados" color={T.accent} bg={T.accentLt}/>
+          <StatTile value={openToPickCount} label="abertos" color="#1D4ED8" bg="#DBEAFE"/>
+          <StatTile value={pendingMatches.length} label="faltam" color={T.half} bg={T.halfBg}/>
+          <StatTile value={lockedMatchCount} label="fechados" color={T.txt3} bg={T.bg}/>
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(190px,1fr))',gap:10}}>
+          <div style={{border:'1px solid '+T.border,borderRadius:12,padding:'11px 12px',background:'#F8FAFC'}}><div style={{fontSize:11,fontWeight:950,color:T.txt3,textTransform:'uppercase',letterSpacing:.6}}>Proximo jogo</div><div style={{fontSize:12,fontWeight:850,color:T.txt1,marginTop:5,lineHeight:1.45}}>{nextMatch?fDate(nextMatch.dt)+' as '+fTime(nextMatch.dt)+' - '+displayTeam(nextMatch.home)+' x '+displayTeam(nextMatch.away):'Sem proximos jogos'}</div></div>
+          <div style={{border:'1px solid '+T.border,borderRadius:12,padding:'11px 12px',background:'#F8FAFC'}}><div style={{fontSize:11,fontWeight:950,color:T.txt3,textTransform:'uppercase',letterSpacing:.6}}>Proxima abertura</div><div style={{fontSize:12,fontWeight:850,color:T.txt1,marginTop:5,lineHeight:1.45}}>{nextUnlockMatch?unlockLabel(nextUnlockMatch)+' - '+displayTeam(nextUnlockMatch.home)+' x '+displayTeam(nextUnlockMatch.away):'Nada bloqueado'}</div></div>
+          <div style={{border:'1px solid '+T.border,borderRadius:12,padding:'11px 12px',background:'#F8FAFC'}}><div style={{fontSize:11,fontWeight:950,color:T.txt3,textTransform:'uppercase',letterSpacing:.6}}>Proximo fechamento</div><div style={{fontSize:12,fontWeight:850,color:T.txt1,marginTop:5,lineHeight:1.45}}>{nextClosingMatch?fDate(nextClosingMatch.dt)+' as '+fTime(nextClosingMatch.dt)+' - '+displayTeam(nextClosingMatch.home)+' x '+displayTeam(nextClosingMatch.away):'Nada aberto agora'}</div></div>
+        </div>
+      </div>
       {[
         {title:'Palpites da Fase de Grupos',tag:groupAvailablePendingCount?`${groupAvailablePendingCount} para palpitar`:'Nada aberto',text:'Mostra somente o que está liberado para palpitar agora',meta:`${groupAvailablePendingCount} jogos para palpitar agora · ${groupAvailableMatches.length} disponíveis`,ok:groupAvailablePendingCount===0,action:()=>{setTab('matches');setMatchView('groups');setOnlyMissing(groupAvailablePendingCount>0);}},
         {title:'Palpites das Eliminatórias',tag:knockoutAvailablePendingCount?`${knockoutAvailablePendingCount} para palpitar`:'Nada aberto',text:'Mata-mata continua como palpite de placar por jogo',meta:knockoutMatches.length?`${knockoutAvailablePendingCount} jogos para palpitar agora · ${knockoutAvailableMatches.length} disponíveis`:'Aguardando confrontos',ok:knockoutAvailablePendingCount===0,action:()=>{setTab('matches');setMatchView('knockout');setOnlyMissing(knockoutAvailablePendingCount>0);}},
@@ -1597,6 +1670,8 @@ function Bolao(){
           <div style={{textAlign:'right'}}><span style={{display:'inline-block',fontSize:11,fontWeight:950,color:item.meta.color,background:item.meta.bg,borderRadius:999,padding:'5px 9px',whiteSpace:'nowrap'}}>{item.meta.short} - {item.pts??0} pts</span></div>
         </div>)}</div></details>:<div style={{fontSize:13,color:T.txt3,textAlign:'center',padding:'18px'}}>Seus acertos aparecem aqui quando algum resultado for registrado.</div>}
       </div>
+      <SectionTitle title="Ranking por jogo" text="Veja quem pontuou em cada partida depois que o resultado for registrado."/>
+      {matchBoards.length>0?matchBoards.map(item=><details key={item.match.id} style={{marginBottom:10}}><summary style={{listStyle:'none',cursor:'pointer',background:T.card,border:'1px solid '+T.border,borderRadius:14,padding:'13px 15px',boxShadow:shadow,display:'flex',alignItems:'center',gap:12}}><div style={{flex:1}}><div style={{fontSize:13,fontWeight:950,color:T.txt1}}>{fl(item.match.home)} {displayTeam(item.match.home)} x {displayTeam(item.match.away)} {fl(item.match.away)}</div><div style={{fontSize:11,color:T.txt3,marginTop:2}}>{fDate(item.match.dt)} - Resultado: {item.match.result.home} x {item.match.result.away} - {item.rows.length} palpite{item.rows.length!==1?'s':''}</div></div><span style={{fontSize:16,color:T.txt3}}>v</span></summary><div style={{background:T.card,border:'1px solid '+T.border,borderTop:'none',borderRadius:'0 0 14px 14px',overflow:'hidden'}}>{item.rows.map((row,i)=><div key={row.uid} style={{display:'grid',gridTemplateColumns:'34px 1fr auto auto',gap:10,alignItems:'center',padding:'11px 14px',borderTop:i?'1px solid '+T.border:'none',background:row.uid===me?T.accentLt:'#fff'}}><span style={{fontSize:13,fontWeight:950,color:i<3?T.gold:T.txt3}}>{i+1}</span><span style={{fontSize:13,fontWeight:900,color:row.uid===me?T.accent:T.txt1}}>{row.name}{row.uid===me&&<span style={{fontSize:10,color:T.txt3,fontWeight:600}}> - voce</span>}</span><span style={{fontSize:12,color:T.txt2}}>Palpite: {row.pred.home} x {row.pred.away}</span><strong style={{fontSize:13,color:row.meta.color,background:row.meta.bg,borderRadius:999,padding:'5px 9px',whiteSpace:'nowrap'}}>{row.pts} pts</strong></div>)}</div></details>):<div className="lux-card" style={{background:T.card,border:'1px solid '+T.border,borderRadius:18,padding:'24px',boxShadow:shadow,textAlign:'center',color:T.txt2,fontSize:13,marginBottom:18}}>O ranking por jogo aparece quando houver resultado registrado.</div>}
       <SectionTitle title="Ranking por dia" text="Recortes diários aparecem quando houver jogo com resultado lançado."/>
       {dailyBoards.length>0?dailyBoards.map(group=><details key={group.key} style={{marginBottom:10}}><summary style={{listStyle:'none',cursor:'pointer',background:T.card,border:'1px solid '+T.border,borderRadius:14,padding:'13px 15px',boxShadow:shadow,display:'flex',alignItems:'center',gap:12}}><div style={{flex:1}}><div style={{fontSize:13,fontWeight:950,color:T.txt1,textTransform:'capitalize'}}>{group.label}</div><div style={{fontSize:11,color:T.txt3,marginTop:2}}>{group.matches.length} jogo{group.matches.length!==1?'s':''} com resultado</div></div><span style={{fontSize:16,color:T.txt3}}>⌄</span></summary><div style={{background:T.card,border:'1px solid '+T.border,borderTop:'none',borderRadius:'0 0 14px 14px',overflow:'hidden'}}>{group.board.slice(0,8).map((p,i)=><div key={p.uid} style={{display:'flex',alignItems:'center',gap:10,padding:'11px 14px',borderTop:i?'1px solid '+T.border:'none',background:p.uid===me?T.accentLt:'#fff'}}><span style={{width:28,fontSize:13,fontWeight:950,color:i<3?T.gold:T.txt3}}>{i+1}</span><span style={{flex:1,fontSize:13,fontWeight:900,color:p.uid===me?T.accent:T.txt1}}>{p.name}{p.uid===me&&<span style={{fontSize:10,color:T.txt3,fontWeight:600}}> · você</span>}</span><span style={{fontSize:11,color:T.txt3}}>🎯 {p.exact}</span><strong style={{fontSize:16,color:T.txt1}}>{p.pts} pts</strong></div>)}</div></details>):<div className="lux-card" style={{background:T.card,border:'1px solid '+T.border,borderRadius:18,padding:'24px',boxShadow:shadow,textAlign:'center',color:T.txt2,fontSize:13}}>O ranking diário aparece assim que algum resultado for registrado.</div>}
       <div style={{fontSize:11,color:T.txt3,lineHeight:1.6}}>Desempate: total de pontos → pontos em jogos → placares exatos → vencedores acertados → menos erros → ordem alfabética.</div><div style={{height:88}}/>
@@ -1684,6 +1759,15 @@ function Bolao(){
         </div>
         <div style={{display:'flex',flexDirection:'column',gap:14}}>
 
+          <div className="lux-card" style={{background:T.card,border:'1px solid '+T.border,borderRadius:18,padding:'18px',boxShadow:shadow}}>
+            <SectionTitle title="Exportar dados" text="Baixe ranking, palpites e backup para guardar fora do Firebase."/>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:8}}>
+              <button className="pill" style={{padding:'10px 12px',borderRadius:12,border:'1px solid '+T.accentMd,background:T.accentLt,color:T.accent,fontSize:12,fontWeight:900,cursor:'pointer'}} onClick={exportRankingCsv}>Ranking CSV</button>
+              <button className="pill" style={{padding:'10px 12px',borderRadius:12,border:'1px solid '+T.accentMd,background:T.accentLt,color:T.accent,fontSize:12,fontWeight:900,cursor:'pointer'}} onClick={exportPredictionsCsv}>Palpites CSV</button>
+              <button className="pill" style={{padding:'10px 12px',borderRadius:12,border:'1px solid '+T.border,background:T.bg,color:T.txt1,fontSize:12,fontWeight:900,cursor:'pointer'}} onClick={exportMatchesCsv}>Jogos CSV</button>
+              <button className="pill" style={{padding:'10px 12px',borderRadius:12,border:'1px solid '+T.border,background:T.bg,color:T.txt1,fontSize:12,fontWeight:900,cursor:'pointer'}} onClick={exportBackupJson}>Backup JSON</button>
+            </div>
+          </div>
           <div className="lux-card" style={{background:T.card,border:'1px solid '+T.border,borderRadius:18,padding:'18px',boxShadow:shadow}}>
             <SectionTitle title="Editar/remover eliminatorias" text="Confrontos manuais aparecem aqui. Remover tambem apaga palpites daquele jogo."/>
             {knockoutAdminMatches.length?knockoutAdminMatches.map(m=>{const e=matchEdits[m.id]||{};return <div key={m.id} style={{border:'1px solid '+T.border,borderRadius:14,padding:12,marginBottom:10,background:T.bg}}><div style={{fontSize:11,fontWeight:900,color:T.txt3,marginBottom:8}}>{m.id} - {m.ph}</div><div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(120px,1fr))',gap:8,marginBottom:8}}><input className="inp" style={inpSt} placeholder="Time casa" value={e.home||''} onChange={ev=>setMatchEdits(x=>({...x,[m.id]:{...x[m.id],home:ev.target.value}}))}/><input className="inp" style={inpSt} placeholder="Time fora" value={e.away||''} onChange={ev=>setMatchEdits(x=>({...x,[m.id]:{...x[m.id],away:ev.target.value}}))}/><select className="inp" style={inpSt} value={e.ph||'Oitavas'} onChange={ev=>setMatchEdits(x=>({...x,[m.id]:{...x[m.id],ph:ev.target.value,gr:ev.target.value==='Grupos'?(x[m.id]?.gr||'A'):''}}))}><option>32-avos</option><option>Oitavas</option><option>Quartas</option><option>Semis</option><option>3rd Lugar</option><option>Final</option></select><input className="inp" style={inpSt} type="datetime-local" value={e.dt||''} onChange={ev=>setMatchEdits(x=>({...x,[m.id]:{...x[m.id],dt:ev.target.value}}))}/><input className="inp" style={inpSt} placeholder="Cidade/estadio" value={e.venue||''} onChange={ev=>setMatchEdits(x=>({...x,[m.id]:{...x[m.id],venue:ev.target.value}}))}/></div><div style={{display:'flex',gap:8,justifyContent:'flex-end'}}><button className="pill" style={{padding:'8px 12px',borderRadius:10,border:'1px solid '+T.border,background:T.card,color:T.err,fontSize:11,fontWeight:900,cursor:'pointer'}} onClick={()=>removeMatch(m.id)}>Remover</button><button className="btn-acc" style={{...btnAcc,padding:'8px 12px',fontSize:11}} onClick={()=>updateMatch(m.id)}>Salvar</button></div></div>}):<div style={{fontSize:12,color:T.txt3,lineHeight:1.5}}>Nenhum confronto de eliminatorias cadastrado ainda. Use o bloco acima para adicionar quando os jogos forem definidos.</div>}
