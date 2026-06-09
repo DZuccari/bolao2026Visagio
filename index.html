@@ -1241,6 +1241,24 @@ function Bolao(){
     ...group,
     board:scoreBoardForMatches(group.matches).filter(p=>p.total>0||p.pts>0),
   })).filter(group=>group.board.length>0);
+  const scoreMeta=pts=>{
+    if(pts===7) return {key:'exact',label:'Placar exato',short:'Exato',color:T.ok,bg:T.okBg};
+    if(pts===4) return {key:'winnerGoal',label:'Vencedor/empate + um gol',short:'Vencedor + gol',color:T.half,bg:T.halfBg};
+    if(pts===3) return {key:'winner',label:'Vencedor/empate',short:'Vencedor',color:T.accent,bg:T.accentLt};
+    if(pts===1) return {key:'goal',label:'Um gol certo',short:'Gol certo',color:'#1D4ED8',bg:'#DBEAFE'};
+    if(pts===0) return {key:'miss',label:'Nao pontuou',short:'Zerou',color:T.err,bg:T.errBg};
+    return {key:'none',label:'Sem palpite',short:'Sem palpite',color:T.txt3,bg:T.bg};
+  };
+  const myScoredBreakdown=scoredMatches.map(m=>{
+    const pred=myPredMap[m.id];
+    const pts=pred?calcPts(pred,m.result):null;
+    const meta=scoreMeta(pts);
+    return {m,pred,pts,meta};
+  }).sort((a,b)=>new Date(b.m.dt)-new Date(a.m.dt));
+  const myScoreSummary=myScoredBreakdown.reduce((acc,item)=>{
+    acc[item.meta.key]=(acc[item.meta.key]||0)+1;
+    return acc;
+  },{});
   const champPredCount=parts.filter(p=>champPreds[p]).length;
   const StatTile=({value,label,color=T.txt1,bg=T.bg})=>(
     <div className="mini-tile" style={{background:bg,border:`1px solid ${T.border}`,borderRadius:14,padding:'12px 10px',textAlign:'center',minHeight:62,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center'}}>
@@ -1562,6 +1580,22 @@ function Bolao(){
           </table>
         </div>
         {board.length===0&&<div style={{padding:'28px',fontSize:13,color:T.txt3,textAlign:'center'}}>Nenhum participante com palpite ainda.</div>}
+      </div>
+      <SectionTitle title="Seus acertos" text="Veja jogo a jogo onde voce pontuou, onde acertou gols e onde nao marcou ponto."/>
+      <div className="lux-card" style={{background:T.card,border:'1px solid '+T.border,borderRadius:18,padding:'16px',boxShadow:shadow,marginBottom:18}}>
+        <div className="info-grid" style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:10,marginBottom:14}}>
+          <StatTile value={myScoreSummary.exact||0} label="exatos" color={T.ok} bg={T.okBg}/>
+          <StatTile value={(myScoreSummary.winnerGoal||0)+(myScoreSummary.winner||0)} label="vencedor" color={T.half} bg={T.halfBg}/>
+          <StatTile value={myScoreSummary.goal||0} label="gols" color="#1D4ED8" bg="#DBEAFE"/>
+          <StatTile value={myScoreSummary.miss||0} label="zerou" color={T.err} bg={T.errBg}/>
+          <StatTile value={myScoreSummary.none||0} label="sem palpite" color={T.txt3} bg={T.bg}/>
+        </div>
+        {myScoredBreakdown.length?<details style={{borderTop:'1px solid '+T.border,paddingTop:12}}><summary style={{listStyle:'none',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,padding:'12px 14px',border:'1px solid '+T.border,borderRadius:12,background:T.bg}}><span><strong style={{fontSize:13,color:T.txt1}}>Ver jogos pontuados</strong><span style={{display:'block',fontSize:11,color:T.txt3,marginTop:2}}>{myScoredBreakdown.length} jogo{myScoredBreakdown.length!==1?'s':''} com resultado</span></span><span style={{fontSize:16,color:T.txt3}}>v</span></summary><div style={{paddingTop:10}}>{myScoredBreakdown.map(item=><div key={item.m.id} style={{display:'grid',gridTemplateColumns:'1.3fr .75fr .75fr auto',gap:10,alignItems:'center',padding:'11px 0',borderTop:'1px solid '+T.border}}>
+          <div style={{minWidth:0}}><div style={{fontSize:13,fontWeight:950,color:T.txt1}}>{fl(item.m.home)} {displayTeam(item.m.home)} x {displayTeam(item.m.away)} {fl(item.m.away)}</div><div style={{fontSize:10,color:T.txt3,marginTop:2}}>{fDate(item.m.dt)} - {item.m.ph==='Grupos'?'Grupo '+item.m.gr:item.m.ph}</div></div>
+          <div style={{fontSize:12,color:T.txt2}}><strong style={{color:T.txt1}}>Seu:</strong> {item.pred?item.pred.home+' x '+item.pred.away:'sem palpite'}</div>
+          <div style={{fontSize:12,color:T.txt2}}><strong style={{color:T.txt1}}>Real:</strong> {item.m.result.home} x {item.m.result.away}</div>
+          <div style={{textAlign:'right'}}><span style={{display:'inline-block',fontSize:11,fontWeight:950,color:item.meta.color,background:item.meta.bg,borderRadius:999,padding:'5px 9px',whiteSpace:'nowrap'}}>{item.meta.short} - {item.pts??0} pts</span></div>
+        </div>)}</div></details>:<div style={{fontSize:13,color:T.txt3,textAlign:'center',padding:'18px'}}>Seus acertos aparecem aqui quando algum resultado for registrado.</div>}
       </div>
       <SectionTitle title="Ranking por dia" text="Recortes diários aparecem quando houver jogo com resultado lançado."/>
       {dailyBoards.length>0?dailyBoards.map(group=><details key={group.key} style={{marginBottom:10}}><summary style={{listStyle:'none',cursor:'pointer',background:T.card,border:'1px solid '+T.border,borderRadius:14,padding:'13px 15px',boxShadow:shadow,display:'flex',alignItems:'center',gap:12}}><div style={{flex:1}}><div style={{fontSize:13,fontWeight:950,color:T.txt1,textTransform:'capitalize'}}>{group.label}</div><div style={{fontSize:11,color:T.txt3,marginTop:2}}>{group.matches.length} jogo{group.matches.length!==1?'s':''} com resultado</div></div><span style={{fontSize:16,color:T.txt3}}>⌄</span></summary><div style={{background:T.card,border:'1px solid '+T.border,borderTop:'none',borderRadius:'0 0 14px 14px',overflow:'hidden'}}>{group.board.slice(0,8).map((p,i)=><div key={p.uid} style={{display:'flex',alignItems:'center',gap:10,padding:'11px 14px',borderTop:i?'1px solid '+T.border:'none',background:p.uid===me?T.accentLt:'#fff'}}><span style={{width:28,fontSize:13,fontWeight:950,color:i<3?T.gold:T.txt3}}>{i+1}</span><span style={{flex:1,fontSize:13,fontWeight:900,color:p.uid===me?T.accent:T.txt1}}>{p.name}{p.uid===me&&<span style={{fontSize:10,color:T.txt3,fontWeight:600}}> · você</span>}</span><span style={{fontSize:11,color:T.txt3}}>🎯 {p.exact}</span><strong style={{fontSize:16,color:T.txt1}}>{p.pts} pts</strong></div>)}</div></details>):<div className="lux-card" style={{background:T.card,border:'1px solid '+T.border,borderRadius:18,padding:'24px',boxShadow:shadow,textAlign:'center',color:T.txt2,fontSize:13}}>O ranking diário aparece assim que algum resultado for registrado.</div>}
