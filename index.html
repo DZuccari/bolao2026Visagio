@@ -205,7 +205,7 @@ const LONG_SCORER_PTS = 15;
 const LONG_PLAYER_PTS = 15;
 const VICE_PTS = 20;
 const THIRD_PTS = 15;
-const CHAMP_RULE_LOCK_TS = 1781204400000; // 11/06/2026 16:00 BRT
+const CHAMP_RULE_LOCK_TS = 1781319599999; // 12/06/2026 23:59:59 BRT
 const FLAGS = {
   'México':'🇲🇽','África do Sul':'🇿🇦','Coreia do Sul':'🇰🇷','Tchéquia':'🇨🇿',
   'Canadá':'🇨🇦','Bósnia-Herzegovina':'🇧🇦','Catar':'🇶🇦','Suíça':'🇨🇭',
@@ -461,10 +461,8 @@ function Bolao(){
   const [newM,setNewM]=useState({home:'',away:'',ph:'Oitavas',gr:'',dt:'',venue:''});
   const [matchEdits,setMatchEdits]=useState({});
   const isAdmin = !!(me && adminIds[me]);
-  const firstMatch = matches[0] || BASE_MATCHES[0] || null;
-  const champLockDt = firstMatch?.dt || '';
-  const champLocked = champLockDt ? started(champLockDt) : false;
-  const champLockLabel = champLockDt ? `${fDate(champLockDt)} às ${fTime(champLockDt)}` : 'início do primeiro jogo';
+  const champLocked = Date.now() >= CHAMP_RULE_LOCK_TS;
+  const champLockLabel = '12/06/2026 \u00e0s 23:59';
   const matchListForUnlock=matches&&matches.length?matches:BASE_MATCHES;
   const dayFirstKickoffByKey=React.useMemo(()=>{
     const out={};
