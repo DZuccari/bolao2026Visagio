@@ -1399,6 +1399,44 @@ function Bolao(){
       return {uid,name:getName(uid),pred,pts:pts??0,hasPred:!!pred,meta:scoreMeta(pts)};
     }).filter(row=>row.hasPred).sort((a,b)=>b.pts-a.pts||a.name.localeCompare(b.name,'pt-BR'))
   })).filter(item=>item.rows.length>0).sort((a,b)=>new Date(b.match.dt)-new Date(a.match.dt));
+  const matchSummaryFor=m=>{
+    const rows=[...parts].map(uid=>{
+      const pred=(preds[uid]||{})[m.id];
+      const hasPred=!!pred&&pred.home!==''&&pred.home!==undefined&&pred.away!==''&&pred.away!==undefined;
+      const pts=hasPred?calcPts(pred,m.result):null;
+      return {uid,name:getName(uid),pred,pts:pts??0,hasPred,meta:scoreMeta(pts)};
+    });
+    const withPred=rows.filter(r=>r.hasPred);
+    const exact=withPred.filter(r=>r.pts===7);
+    const winner=withPred.filter(r=>r.pts===4||r.pts===3);
+    const goal=withPred.filter(r=>r.pts===1);
+    const miss=withPred.filter(r=>r.pts===0);
+    const noPred=rows.filter(r=>!r.hasPred);
+    const rank=withPred.slice().sort((a,b)=>b.pts-a.pts||a.name.localeCompare(b.name,'pt-BR'));
+    const names=arr=>arr.length?arr.map(r=>r.name).join(', '):'Ninguem';
+    const title=displayTeam(m.home)+' '+m.result.home+' x '+m.result.away+' '+displayTeam(m.away);
+    const phase=m.ph==='Grupos'?'Grupo '+m.gr:m.ph;
+    const text=[
+      'Resumo do jogo: '+title,
+      fDate(m.dt)+' - '+phase,
+      '',
+      'Placar exato (+7): '+names(exact),
+      'Vencedor/empate (+3/+4): '+names(winner),
+      'Acertou um gol (+1): '+names(goal),
+      'Zerou: '+names(miss),
+      'Sem palpite: '+names(noPred),
+      '',
+      'Pontuacao do jogo:',
+      ...(rank.length?rank.map(r=>r.name+': +'+r.pts+' pts (palpite '+r.pred.home+'x'+r.pred.away+')'):['Nenhum palpite registrado.'])
+    ].join('\n');
+    return {match:m,title,phase,rows,withPred,exact,winner,goal,miss,noPred,rank,text};
+  };
+  const matchSummaries=scoredMatches.map(matchSummaryFor).sort((a,b)=>new Date(b.match.dt)-new Date(a.match.dt));
+  const copyMatchSummary=summary=>{
+    navigator.clipboard.writeText(summary.text)
+      .then(()=>showToast('Resumo do jogo copiado!'))
+      .catch(()=>showToast('Nao consegui copiar o resumo.',false));
+  };
   const champPredCount=parts.filter(p=>champPreds[p]).length;
   const StatTile=({value,label,color=T.txt1,bg=T.bg})=>(
     <div className="mini-tile" style={{background:bg,border:`1px solid ${T.border}`,borderRadius:14,padding:'12px 10px',textAlign:'center',minHeight:62,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center'}}>
@@ -1860,6 +1898,10 @@ function Bolao(){
           <div className="lux-card" style={{background:T.card,border:'1px solid '+T.border,borderRadius:18,padding:'18px',boxShadow:shadow}}>
             <SectionTitle title="Registrar resultados" text="Resultados liberam pontos de placar no ranking."/>
             <div style={{maxHeight:560,overflow:'auto',paddingRight:4}}>{matches.map(m=><div key={m.id} style={{display:'flex',alignItems:'center',padding:'9px 0',borderBottom:'1px solid '+T.border,flexWrap:'wrap',gap:8}}><span style={{fontSize:12,color:T.txt2,flex:1,minWidth:220}}><span style={{color:T.accent,fontWeight:900,marginRight:6}}>{m.ph==='Grupos'?'Grupo '+m.gr:m.ph}</span>{fl(m.home)} {m.home} × {m.away} {fl(m.away)}<span style={{color:T.txt3,marginLeft:6}}>{fDate(m.dt)}</span></span><div style={{display:'flex',alignItems:'center',gap:6}}><input style={{width:42,padding:'6px',textAlign:'center',borderRadius:8,border:'1.5px solid '+T.border,background:T.bg,color:T.txt1,fontSize:15,fontWeight:900,outline:'none'}} type="number" min="0" max="20" value={ri[m.id]?.home||''} onChange={e=>setRi(r=>({...r,[m.id]:{...r[m.id],home:e.target.value}}))}/><span style={{color:T.txt3,fontWeight:900}}>-</span><input style={{width:42,padding:'6px',textAlign:'center',borderRadius:8,border:'1.5px solid '+T.border,background:T.bg,color:T.txt1,fontSize:15,fontWeight:900,outline:'none'}} type="number" min="0" max="20" value={ri[m.id]?.away||''} onChange={e=>setRi(r=>({...r,[m.id]:{...r[m.id],away:e.target.value}}))}/><button className="btn-acc" style={{...btnAcc,padding:'6px 11px',fontSize:11}} onClick={()=>saveResult(m.id)}>OK</button></div></div>)}</div>
+          </div>
+          <div className="lux-card" style={{background:T.card,border:'1px solid '+T.border,borderRadius:18,padding:'18px',boxShadow:shadow}}>
+            <SectionTitle title="Resumos por jogo" text="Depois de lancar o resultado, copie um resumo pronto para mandar no grupo."/>
+            {matchSummaries.length?matchSummaries.map(summary=><details key={summary.match.id} style={{marginBottom:10}}><summary style={{listStyle:'none',cursor:'pointer',background:T.bg,border:'1px solid '+T.border,borderRadius:14,padding:'12px 14px',display:'flex',alignItems:'center',gap:12}}><div style={{flex:1,minWidth:0}}><div style={{fontSize:13,fontWeight:950,color:T.txt1}}>{fl(summary.match.home)} {summary.title} {fl(summary.match.away)}</div><div style={{fontSize:11,color:T.txt3,marginTop:2}}>{summary.phase} - {summary.withPred.length} palpite{summary.withPred.length!==1?'s':''} - {summary.exact.length} exato{summary.exact.length!==1?'s':''}</div></div><button className="btn-acc" style={{...btnAcc,padding:'7px 10px',fontSize:11}} onClick={e=>{e.preventDefault();e.stopPropagation();copyMatchSummary(summary);}}>Copiar</button><span style={{fontSize:15,color:T.txt3}}>v</span></summary><div style={{border:'1px solid '+T.border,borderTop:'none',borderRadius:'0 0 14px 14px',padding:14,background:'#fff'}}><div className="info-grid" style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:8,marginBottom:12}}><StatTile value={summary.exact.length} label="exatos" color={T.ok} bg={T.okBg}/><StatTile value={summary.winner.length} label="vencedor" color={T.half} bg={T.halfBg}/><StatTile value={summary.goal.length} label="um gol" color="#1D4ED8" bg="#DBEAFE"/><StatTile value={summary.miss.length} label="zerou" color={T.err} bg={T.errBg}/><StatTile value={summary.noPred.length} label="sem palpite" color={T.txt3} bg={T.bg}/></div><pre style={{whiteSpace:'pre-wrap',fontFamily:'inherit',fontSize:12,lineHeight:1.55,color:T.txt2,background:T.bg,border:'1px solid '+T.border,borderRadius:12,padding:12,margin:0}}>{summary.text}</pre></div></details>):<div style={{fontSize:12,color:T.txt3,lineHeight:1.5}}>Quando voce lancar o resultado de um jogo, o resumo aparece aqui automaticamente.</div>}
           </div>
           <div className="lux-card" style={{background:T.card,border:'1px solid '+T.border,borderRadius:18,padding:'18px',boxShadow:shadow}}>
             <SectionTitle title="Adicionar partida" text="Use principalmente para cadastrar jogos das eliminatórias quando os confrontos saírem."/>
