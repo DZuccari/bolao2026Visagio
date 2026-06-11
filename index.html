@@ -201,6 +201,8 @@ const NAME_STORAGE_KEY = 'bolao2026_me';
 const REMINDER_STORAGE_KEY = 'bolao2026_reminder_enabled';
 const PREDICTION_OPEN_MS = 48*60*60*1000;
 const CHAMP_PTS = 25;
+const LONG_SCORER_PTS = 15;
+const LONG_PLAYER_PTS = 15;
 const VICE_PTS = 20;
 const THIRD_PTS = 15;
 const CHAMP_RULE_LOCK_TS = 1781204400000; // 11/06/2026 16:00 BRT
@@ -433,16 +435,20 @@ function Bolao(){
   const [champWinner,setChampWinner]=useState('');
   const [podiumPreds,setPodiumPreds]=useState({});
   const [bracketPreds,setBracketPreds]=useState({});
+  const [longTermPreds,setLongTermPreds]=useState({});
   const [officialPodium,setOfficialPodium]=useState(emptyPodium());
   const [officialBracket,setOfficialBracket]=useState(emptyBracket());
+  const [officialLongTerm,setOfficialLongTerm]=useState({topScorer:'',bestPlayer:''});
   const [pi,setPi]=useState({});        // local prediction inputs
   const [ri,setRi]=useState({});        // local result inputs (admin)
   const [champInput,setChampInput]=useState('');
   const [podiumInput,setPodiumInput]=useState(emptyPodium());
   const [bracketInput,setBracketInput]=useState(emptyBracket());
+  const [longTermInput,setLongTermInput]=useState({topScorer:'',bestPlayer:''});
   const [adminChampInput,setAdminChampInput]=useState('');
   const [officialPodiumInput,setOfficialPodiumInput]=useState(emptyPodium());
   const [officialBracketInput,setOfficialBracketInput]=useState(emptyBracket());
+  const [officialLongTermInput,setOfficialLongTermInput]=useState({topScorer:'',bestPlayer:''});
   const [onlyMissing,setOnlyMissing]=useState(false);
   const [matchView,setMatchView]=useState('groups');
   const [generalView,setGeneralView]=useState('groups');
@@ -482,6 +488,7 @@ function Bolao(){
     return acc;
   },{});
   const normalizePodium=obj=>({...emptyPodium(),...(obj||{})});
+  const normalizeLongTerm=obj=>({topScorer:'',bestPlayer:'',...(obj||{})});
 
   const showToast=(msg,ok=true)=>{setToast({msg,ok});setTimeout(()=>setToast({msg:'',ok:true}),2600);};
   const getName = uid => partMeta[uid]?.name || 'Sem nome';
@@ -510,8 +517,10 @@ function Bolao(){
         setChampWinner('');
         setPodiumPreds({});
         setBracketPreds({});
+        setLongTermPreds({});
         setOfficialPodium(emptyPodium());
         setOfficialBracket(emptyBracket());
+        setOfficialLongTerm(normalizeLongTerm({}));
         setAudit([]);
         setBoot(false);
       }
@@ -549,8 +558,10 @@ function Bolao(){
     const champWinnerRef = ref('champWinner');
     const podiumRef = ref('podiumPreds');
     const bracketRef = ref('bracketPreds');
+    const longTermRef = ref('longTermPreds');
     const officialPodiumRef = ref('officialPodium');
     const officialBracketRef = ref('officialBracket');
+    const officialLongTermRef = ref('officialLongTerm');
     const auditQuery = ref('audit').limitToLast(30);
 
     const matchesUnsub = matchesRef.on('value', snap=>{
@@ -626,6 +637,11 @@ function Bolao(){
       setBracketPreds(snap.val()||{});
     }, err=>onReadError(err,'bracketPreds.on'));
 
+    const longTermUnsub = longTermRef.on('value', snap=>{
+      if(!live) return;
+      setLongTermPreds(snap.val()||{});
+    }, err=>onReadError(err,'longTermPreds.on'));
+
     const officialPodiumUnsub = officialPodiumRef.on('value', snap=>{
       if(!live) return;
       const val=snap.val()||emptyPodium();
@@ -642,6 +658,13 @@ function Bolao(){
       setOfficialBracketInput(normalized);
     }, err=>onReadError(err,'officialBracket.on'));
 
+    const officialLongTermUnsub = officialLongTermRef.on('value', snap=>{
+      if(!live) return;
+      const val=normalizeLongTerm(snap.val()||{});
+      setOfficialLongTerm(val);
+      setOfficialLongTermInput(val);
+    }, err=>onReadError(err,'officialLongTerm.on'));
+
     return ()=>{
       live=false;
       matchesRef.off('value', matchesUnsub);
@@ -653,8 +676,10 @@ function Bolao(){
       champWinnerRef.off('value', champWinUnsub);
       podiumRef.off('value', podiumUnsub);
       bracketRef.off('value', bracketUnsub);
+      longTermRef.off('value', longTermUnsub);
       officialPodiumRef.off('value', officialPodiumUnsub);
       officialBracketRef.off('value', officialBracketUnsub);
+      officialLongTermRef.off('value', officialLongTermUnsub);
     };
   },[authReady, me, isAdmin]);
 
@@ -667,7 +692,8 @@ function Bolao(){
     setChampInput(champPreds[me]||'');
     setPodiumInput(normalizePodium(podiumPreds[me]||{champ:champPreds[me]||'',vice:'',third:''}));
     setBracketInput(normalizeBracket(bracketPreds[me]||{}));
-  },[me, matches, preds[me], champPreds[me], podiumPreds[me], bracketPreds[me]]);
+    setLongTermInput(normalizeLongTerm(longTermPreds[me]||{}));
+  },[me, matches, preds[me], champPreds[me], podiumPreds[me], bracketPreds[me], longTermPreds[me]]);
 
   useEffect(()=>{
     if(me) setChampInput(champPreds[me]||'');
@@ -705,6 +731,7 @@ function Bolao(){
         if(!champPreds[me]&&champPreds[legacyId]) await ref('champPreds/'+me).set(champPreds[legacyId]);
         if(!podiumPreds[me]&&podiumPreds[legacyId]) await ref('podiumPreds/'+me).set(podiumPreds[legacyId]);
         if(!bracketPreds[me]&&bracketPreds[legacyId]) await ref('bracketPreds/'+me).set(bracketPreds[legacyId]);
+        if(!longTermPreds[me]&&longTermPreds[legacyId]) await ref('longTermPreds/'+me).set(longTermPreds[legacyId]);
       }
       setMeName(raw);
       setPartMeta(prev=>({...prev,[me]:{name:raw,email:meEmail||''}}));
@@ -719,6 +746,7 @@ function Bolao(){
     setChampInput(champPreds[me]||'');
     setPodiumInput(normalizePodium(podiumPreds[me]||{champ:champPreds[me]||'',vice:'',third:''}));
     setBracketInput(normalizeBracket(bracketPreds[me]||{}));
+    setLongTermInput(normalizeLongTerm(longTermPreds[me]||{}));
   };
 
   const signInGoogle=async()=>{
@@ -819,6 +847,26 @@ function Bolao(){
     }
   };
 
+  const saveLongTerm=async()=>{
+    if(champLocked){showToast('Palpites de longo prazo bloqueados apos o inicio da Copa.',false);return;}
+    const data=normalizeLongTerm(longTermInput);
+    const champ=(champInput||'').trim();
+    data.topScorer=(data.topScorer||'').trim();
+    data.bestPlayer=(data.bestPlayer||'').trim();
+    if(!champ||!data.topScorer||!data.bestPlayer){showToast('Preencha campeao, artilheiro e melhor jogador.',false);return;}
+    setSaving('longTerm');
+    try{
+      await ref('champPreds/'+me).set(champ);
+      await ref('podiumPreds/'+me).update({champ});
+      await ref('longTermPreds/'+me).set(data);
+      showToast('Palpites de longo prazo salvos!');
+    }catch{
+      showToast('Erro ao salvar longo prazo.',false);
+    }finally{
+      setSaving(null);
+    }
+  };
+
   const savePodium=async()=>{
     if(champLocked){showToast('Pódio bloqueado após o início da Copa.',false);return;}
     const data=normalizePodium(podiumInput);
@@ -901,6 +949,27 @@ function Bolao(){
     }
   };
 
+  const saveOfficialLongTerm=async()=>{
+    if(!isAdmin){showToast('Acao permitida so para admin.',false);return;}
+    const data=normalizeLongTerm(officialLongTermInput);
+    data.topScorer=(data.topScorer||'').trim();
+    data.bestPlayer=(data.bestPlayer||'').trim();
+    setSaving('officialLongTerm');
+    try{
+      await ref('officialLongTerm').set(data);
+      if(adminChampInput){
+        await ref('champWinner').set(adminChampInput);
+        await ref('officialPodium').update({champ:adminChampInput});
+      }
+      await logAdminAction('set_official_long_term',{...data,champ:adminChampInput||''});
+      showToast('Longo prazo oficial salvo!');
+    }catch{
+      showToast('Erro ao salvar longo prazo oficial.',false);
+    }finally{
+      setSaving(null);
+    }
+  };
+
   const saveOfficialBracket=async()=>{
     if(!isAdmin){showToast('Ação permitida só para admin.',false);return;}
     const data=normalizeBracket(officialBracketInput);
@@ -926,6 +995,7 @@ function Bolao(){
       await ref('champPreds/'+uid).remove();
       await ref('podiumPreds/'+uid).remove();
       await ref('bracketPreds/'+uid).remove();
+      await ref('longTermPreds/'+uid).remove();
       await logAdminAction('remove_participant',{uid,name:label});
       showToast(`${label} removido.`);
     }catch{
@@ -1023,8 +1093,8 @@ function Bolao(){
   };
   const downloadCsv=(filename,rows)=>downloadTextFile(filename,rows.map(row=>row.map(csvCell).join(';')).join('\n'));
   const exportRankingCsv=()=>downloadCsv('ranking-bolao.csv',[
-    ['posicao','participante','pontos','exatos','vencedor_empate','erros','pts_grupos','pts_eliminatorias','palpites_pontuados'],
-    ...board.map((p,i)=>[i+1,p.name,p.pts,p.exact,p.win,p.miss,p.groupPts,p.elimPts,p.total])
+    ['posicao','participante','pontos','exatos','vencedor_empate','erros','pts_grupos','pts_eliminatorias','pts_longo_prazo','palpites_pontuados'],
+    ...board.map((p,i)=>[i+1,p.name,p.pts,p.exact,p.win,p.miss,p.groupPts,p.elimPts,(p.podiumPts||0)+(p.longTermPts||0),p.total])
   ]);
   const exportPredictionsCsv=()=>downloadCsv('palpites-bolao.csv',[
     ['participante','uid','jogo_id','fase','grupo','casa','fora','data','palpite_casa','palpite_fora','resultado_casa','resultado_fora','pontos'],
@@ -1038,7 +1108,7 @@ function Bolao(){
     ['jogo_id','fase','grupo','casa','fora','data','local','abre_em','fecha_em','resultado_casa','resultado_fora'],
     ...matches.map(m=>[m.id,m.ph,m.gr||'',displayTeam(m.home),displayTeam(m.away),m.dt,m.venue||'',m.unlockAt||'',m.lockAt||'',m.result?.home??'',m.result?.away??''])
   ]);
-  const exportBackupJson=()=>downloadTextFile('backup-bolao.json',JSON.stringify({exportedAt:new Date().toISOString(),root:REF_ROOT,matches,predictions:preds,participants:partMeta,admins:adminIds,champPreds,podiumPreds,bracketPreds,officialPodium,officialBracket,champWinner,audit},null,2),'application/json;charset=utf-8');
+  const exportBackupJson=()=>downloadTextFile('backup-bolao.json',JSON.stringify({exportedAt:new Date().toISOString(),root:REF_ROOT,matches,predictions:preds,participants:partMeta,admins:adminIds,champPreds,podiumPreds,bracketPreds,officialPodium,officialBracket,officialLongTerm,champWinner,longTermPreds,audit},null,2),'application/json;charset=utf-8');
 
   const requestReminderPermission=async()=>{
     if(!('Notification' in window)){showToast('Seu navegador não suporta notificações.',false);return;}
@@ -1134,6 +1204,16 @@ function Bolao(){
     return {total,filled,possible,phaseScores};
   };
   const podiumFor=uid=>normalizePodium(podiumPreds[uid]||{champ:champPreds[uid]||'',vice:'',third:''});
+  const longTermFor=uid=>normalizeLongTerm(longTermPreds[uid]||{});
+  const normTxt=v=>String(v||'').trim().toLowerCase();
+  const longTermScoreFor=uid=>{
+    const pred=longTermFor(uid);
+    const official=normalizeLongTerm(officialLongTerm);
+    const scorerHit=!!official.topScorer&&normTxt(pred.topScorer)===normTxt(official.topScorer);
+    const playerHit=!!official.bestPlayer&&normTxt(pred.bestPlayer)===normTxt(official.bestPlayer);
+    const total=(scorerHit?LONG_SCORER_PTS:0)+(playerHit?LONG_PLAYER_PTS:0);
+    return {total,scorerHit,playerHit,filled:[pred.topScorer,pred.bestPlayer].filter(Boolean).length};
+  };
   const podiumScoreFor=uid=>{
     const pred=podiumFor(uid);
     const official={...normalizePodium(officialPodium),champ:officialPodium.champ||champWinner};
@@ -1154,20 +1234,22 @@ function Bolao(){
     });
     const bracket=includeChampion?bracketScoreFor(uid):{total:0,filled:0,possible:0,phaseScores:{}};
     const podium=includeChampion?podiumScoreFor(uid):{total:0,champHit:false,viceHit:false,thirdHit:false,filled:0};
-    const pts=gamePts+bracket.total+podium.total;
-    return {uid,name,pts,gamePts,groupPts,elimPts,classifiedPts:bracket.total,podiumPts:podium.total,exact,win,miss,total,bracket,podium,champHit:podium.champHit?1:0};
+    const longTerm=includeChampion?longTermScoreFor(uid):{total:0,scorerHit:false,playerHit:false,filled:0};
+    const pts=gamePts+bracket.total+podium.total+longTerm.total;
+    return {uid,name,pts,gamePts,groupPts,elimPts,classifiedPts:bracket.total,podiumPts:podium.total,longTermPts:longTerm.total,exact,win,miss,total,bracket,podium,longTerm,champHit:podium.champHit?1:0};
   }).sort((a,b)=>
     b.pts-a.pts ||
     b.gamePts-a.gamePts ||
     b.classifiedPts-a.classifiedPts ||
     b.podiumPts-a.podiumPts ||
+    b.longTermPts-a.longTermPts ||
     b.exact-a.exact ||
     b.win-a.win ||
     b.champHit-a.champHit ||
     a.miss-b.miss ||
     a.name.localeCompare(b.name,'pt-BR')
   );
-  const board=scoreBoardForMatches(matches,{includeChampion:false});
+  const board=scoreBoardForMatches(matches,{includeChampion:true});
   const myPredMap=preds[me]||{};
   const savedPredCount=matches.filter(m=>myPredMap[m.id]&&myPredMap[m.id].home!=='').length;
   const lockedMatchCount=matches.filter(m=>started(m.dt)).length;
@@ -1182,8 +1264,10 @@ function Bolao(){
   const nextMatch=nextMatches[0]||null;
   const nextUnlockMatch=matches.filter(m=>!predictionOpen(m)&&!matchLocked(m)).sort((a,b)=>unlockAt(a)-unlockAt(b))[0]||null;
   const nextClosingMatch=matches.filter(m=>canEditMatch(m)).sort((a,b)=>new Date(a.dt)-new Date(b.dt))[0]||null;
-  const openToPickCount=groupAvailablePendingCount+knockoutAvailablePendingCount;
   const champDone=!!champPreds[me];
+  const longTermMine=longTermFor(me);
+  const longTermDone=!!champPreds[me]&&!!longTermMine.topScorer&&!!longTermMine.bestPlayer;
+  const longTermPredCount=parts.filter(p=>champPreds[p]&&(longTermPreds[p]?.topScorer||longTermPreds[p]?.bestPlayer)).length;
   const groupMatches=matches.filter(m=>m.ph==='Grupos');
   const savedGroupPredCount=groupMatches.filter(m=>myPredMap[m.id]&&myPredMap[m.id].home!=='').length;
   const groupStandings=GROUPS.map(g=>{
@@ -1224,6 +1308,7 @@ function Bolao(){
   const needsPrediction=m=>!myPredMap[m.id]||myPredMap[m.id].home===''||myPredMap[m.id].away==='';
   const groupAvailablePendingCount=groupAvailableMatches.filter(needsPrediction).length;
   const knockoutAvailablePendingCount=knockoutAvailableMatches.filter(needsPrediction).length;
+  const openToPickCount=groupAvailablePendingCount+knockoutAvailablePendingCount;
   const stageDoneCount=(groupAvailablePendingCount===0?1:0)+(knockoutAvailablePendingCount===0?1:0);
   const actionCount=groupAvailablePendingCount+knockoutAvailablePendingCount;
 
@@ -1612,11 +1697,25 @@ function Bolao(){
 
   const TabMatches=(
     <div style={{padding:'28px 14px 72px',maxWidth:1120,margin:'0 auto'}}>
-      <div style={{marginBottom:22}}><div style={{fontSize:13,color:T.txt3,marginBottom:8}}>Seus palpites</div><h1 style={{fontSize:30,lineHeight:1.1,color:T.txt1,letterSpacing:-.8,marginBottom:8}}>{matchView==='groups'?'Palpites - Fase de Grupos':matchView==='dayPicks'?'Palpites do Dia':'Palpites - Eliminatorias'}</h1><p style={{fontSize:15,color:T.txt2,lineHeight:1.6,maxWidth:760}}>Os jogos de cada dia liberam juntos 2 dias antes do primeiro jogo do dia, e fecham quando cada partida começa.</p></div>
-      <div className="lux-card" style={{background:T.card,border:'1px solid '+T.border,borderRadius:18,padding:'16px',boxShadow:shadow,marginBottom:18}}><div className="info-grid" style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10,marginBottom:14}}><StatTile value={matchView==='groups'?savedGroupPredCount:savedKnockoutPredCount} label="salvos" color={T.accent} bg={T.accentLt}/><StatTile value={matchView==='groups'?Math.max(0,groupMatches.length-savedGroupPredCount):Math.max(0,knockoutMatches.length-savedKnockoutPredCount)} label="faltando" color={T.half} bg={T.halfBg}/><StatTile value={matchView==='groups'?groupAvailablePendingCount:knockoutAvailablePendingCount} label="para palpitar" color="#1D4ED8" bg="#DBEAFE"/><StatTile value="48h" label="janela" color={T.txt1} bg={T.bg}/></div><div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}><button className="pill" style={{padding:'10px 14px',borderRadius:999,border:'1px solid '+(!onlyMissing?T.accent:T.border),fontSize:12,fontWeight:900,background:!onlyMissing?T.accentLt:T.card,color:!onlyMissing?T.accent:T.txt2,cursor:'pointer'}} onClick={()=>setOnlyMissing(false)}>Todos os jogos</button><button className="pill" style={{padding:'10px 14px',borderRadius:999,border:'1px solid '+(onlyMissing?T.half:T.border),fontSize:12,fontWeight:900,background:onlyMissing?T.halfBg:T.card,color:onlyMissing?T.half:T.txt2,cursor:'pointer'}} onClick={()=>setOnlyMissing(true)}>Dispon&iacute;veis para palpitar</button></div></div>
-      <div style={{display:'flex',alignItems:'center',borderBottom:'1px solid '+T.border,marginBottom:18,gap:18,flexWrap:'wrap'}}><button style={{border:'none',borderBottom:'2px solid '+(matchView==='groups'?T.accent:'transparent'),background:'transparent',padding:'0 0 12px',fontSize:14,fontWeight:matchView==='groups'?900:800,color:matchView==='groups'?T.accent:T.txt3,cursor:'pointer'}} onClick={()=>setMatchView('groups')}>Fase de Grupos</button><button style={{border:'none',borderBottom:'2px solid '+(matchView==='knockout'?T.accent:'transparent'),background:'transparent',padding:'0 0 12px',fontSize:14,fontWeight:matchView==='knockout'?900:800,color:matchView==='knockout'?T.accent:T.txt3,cursor:'pointer'}} onClick={()=>{setMatchView('knockout');setOnlyMissing(false);}}>Eliminatórias</button><button style={{border:'none',borderBottom:'2px solid '+(matchView==='dayPicks'?T.accent:'transparent'),background:'transparent',padding:'0 0 12px',fontSize:14,fontWeight:matchView==='dayPicks'?900:800,color:matchView==='dayPicks'?T.accent:T.txt3,cursor:'pointer'}} onClick={()=>{setMatchView('dayPicks');setOnlyMissing(false);}}>Palpites do Dia</button></div>
+      <div style={{marginBottom:22}}><div style={{fontSize:13,color:T.txt3,marginBottom:8}}>Seus palpites</div><h1 style={{fontSize:30,lineHeight:1.1,color:T.txt1,letterSpacing:-.8,marginBottom:8}}>{matchView==='groups'?'Palpites - Fase de Grupos':matchView==='dayPicks'?'Palpites do Dia':matchView==='longTerm'?'Palpites de Longo Prazo':'Palpites - Eliminatorias'}</h1><p style={{fontSize:15,color:T.txt2,lineHeight:1.6,maxWidth:760}}>Os jogos de cada dia liberam juntos 2 dias antes do primeiro jogo do dia, e fecham quando cada partida começa.</p></div>
+      <div className="lux-card" style={{background:T.card,border:'1px solid '+T.border,borderRadius:18,padding:'16px',boxShadow:shadow,marginBottom:18}}><div className="info-grid" style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10,marginBottom:14}}><StatTile value={matchView==='longTerm'?(longTermDone?3:[champPreds[me],longTermMine.topScorer,longTermMine.bestPlayer].filter(Boolean).length):matchView==='groups'?savedGroupPredCount:savedKnockoutPredCount} label="salvos" color={T.accent} bg={T.accentLt}/><StatTile value={matchView==='longTerm'?Math.max(0,3-[champPreds[me],longTermMine.topScorer,longTermMine.bestPlayer].filter(Boolean).length):matchView==='groups'?Math.max(0,groupMatches.length-savedGroupPredCount):Math.max(0,knockoutMatches.length-savedKnockoutPredCount)} label="faltando" color={T.half} bg={T.halfBg}/><StatTile value={matchView==='longTerm'?(champLocked?0:3):matchView==='groups'?groupAvailablePendingCount:knockoutAvailablePendingCount} label="para palpitar" color="#1D4ED8" bg="#DBEAFE"/><StatTile value="48h" label="janela" color={T.txt1} bg={T.bg}/></div><div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}><button className="pill" style={{padding:'10px 14px',borderRadius:999,border:'1px solid '+(!onlyMissing?T.accent:T.border),fontSize:12,fontWeight:900,background:!onlyMissing?T.accentLt:T.card,color:!onlyMissing?T.accent:T.txt2,cursor:'pointer'}} onClick={()=>setOnlyMissing(false)}>Todos os jogos</button><button className="pill" style={{padding:'10px 14px',borderRadius:999,border:'1px solid '+(onlyMissing?T.half:T.border),fontSize:12,fontWeight:900,background:onlyMissing?T.halfBg:T.card,color:onlyMissing?T.half:T.txt2,cursor:'pointer'}} onClick={()=>setOnlyMissing(true)}>Dispon&iacute;veis para palpitar</button></div></div>
+      <div style={{display:'flex',alignItems:'center',borderBottom:'1px solid '+T.border,marginBottom:18,gap:18,flexWrap:'wrap'}}><button style={{border:'none',borderBottom:'2px solid '+(matchView==='groups'?T.accent:'transparent'),background:'transparent',padding:'0 0 12px',fontSize:14,fontWeight:matchView==='groups'?900:800,color:matchView==='groups'?T.accent:T.txt3,cursor:'pointer'}} onClick={()=>setMatchView('groups')}>Fase de Grupos</button><button style={{border:'none',borderBottom:'2px solid '+(matchView==='knockout'?T.accent:'transparent'),background:'transparent',padding:'0 0 12px',fontSize:14,fontWeight:matchView==='knockout'?900:800,color:matchView==='knockout'?T.accent:T.txt3,cursor:'pointer'}} onClick={()=>{setMatchView('knockout');setOnlyMissing(false);}}>Eliminatórias</button><button style={{border:'none',borderBottom:'2px solid '+(matchView==='dayPicks'?T.accent:'transparent'),background:'transparent',padding:'0 0 12px',fontSize:14,fontWeight:matchView==='dayPicks'?900:800,color:matchView==='dayPicks'?T.accent:T.txt3,cursor:'pointer'}} onClick={()=>{setMatchView('dayPicks');setOnlyMissing(false);}}>Palpites do Dia</button><button style={{border:'none',borderBottom:'2px solid '+(matchView==='longTerm'?T.accent:'transparent'),background:'transparent',padding:'0 0 12px',fontSize:14,fontWeight:matchView==='longTerm'?900:800,color:matchView==='longTerm'?T.accent:T.txt3,cursor:'pointer'}} onClick={()=>{setMatchView('longTerm');setOnlyMissing(false);}}>Longo Prazo</button></div>
       {matchView==='groups'&&<><SectionTitle title="Fase de grupos por dia" text="Abra o dia da Copa e preencha os jogos que já estiverem liberados."/>{groupPredictionDayGroups.map((group,idx)=><details key={group.key} open={idx===0||group.matches.some(m=>canEditMatch(m))} style={{marginBottom:10}}><summary style={{listStyle:'none',cursor:'pointer',background:T.card,border:'1px solid '+T.border,borderRadius:12,padding:'12px 14px',boxShadow:shadow,display:'flex',alignItems:'center',gap:12}}><div style={{flex:1}}><div style={{fontSize:13,fontWeight:800,color:T.txt1,textTransform:'capitalize'}}>{group.label}</div><div style={{fontSize:11,color:T.txt3,marginTop:2}}>{group.matches.length} jogo(s) · {group.matches.filter(m=>canEditMatch(m)).length} aberto(s)</div></div><span style={{fontSize:15,color:T.txt3}}>⌄</span></summary><div style={{paddingTop:10}}>{group.matches.map(m=><MatchCard key={m.id} m={m}/>)}</div></details>)}</>}
       {matchView==='knockout'&&<>{knockoutPredictionDayGroups.length?<><SectionTitle title="Eliminatórias" text="Os confrontos continuam sendo palpites de placar, também liberados 2 dias antes."/>{knockoutPredictionDayGroups.map((group,idx)=><details key={group.key} open={idx===0||group.matches.some(m=>canEditMatch(m))} style={{marginBottom:10}}><summary style={{listStyle:'none',cursor:'pointer',background:T.card,border:'1px solid '+T.border,borderRadius:12,padding:'12px 14px',boxShadow:shadow,display:'flex',alignItems:'center',gap:12}}><div style={{flex:1}}><div style={{fontSize:13,fontWeight:800,color:T.txt1,textTransform:'capitalize'}}>{group.label}</div><div style={{fontSize:11,color:T.txt3,marginTop:2}}>{group.matches.length} jogo(s) · {group.matches.filter(m=>canEditMatch(m)).length} aberto(s)</div></div><span style={{fontSize:15,color:T.txt3}}>⌄</span></summary><div style={{paddingTop:10}}>{group.matches.map(m=><MatchCard key={m.id} m={m}/>)}</div></details>)}</>:<div className="lux-card" style={{background:T.card,border:'1px solid '+T.border,borderRadius:18,padding:'26px',boxShadow:shadow,textAlign:'center',color:T.txt2}}><div style={{fontSize:34,marginBottom:8}}>🏟️</div><div style={{fontSize:15,fontWeight:900,color:T.txt1,marginBottom:4}}>Eliminatórias ainda não cadastradas</div><div style={{fontSize:12,lineHeight:1.55}}>Quando os confrontos do mata-mata forem definidos, eles aparecem aqui.</div></div>}</>}
+      {matchView==='longTerm'&&<>
+        <SectionTitle title="Palpites de Longo Prazo" text={champLocked?'Esses palpites fecharam no inicio da Copa.':'Preencha antes do inicio do primeiro jogo da Copa.'}/>
+        <div className="lux-card" style={{background:T.card,border:'1px solid '+T.border,borderRadius:18,padding:'18px',boxShadow:shadow,marginBottom:14}}>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))',gap:12}}>
+            <label style={{display:'flex',flexDirection:'column',gap:6,fontSize:12,fontWeight:900,color:T.txt2}}>Campeao da Copa<select className="inp" style={inpSt} value={champInput} disabled={champLocked} onChange={e=>setChampInput(e.target.value)}><option value="">Escolha o campeao...</option>{ALL_TEAMS.map(t=><option key={t} value={t}>{t}</option>)}</select><span style={{fontSize:10,color:T.txt3,fontWeight:600}}>Vale {CHAMP_PTS} pts</span></label>
+            <label style={{display:'flex',flexDirection:'column',gap:6,fontSize:12,fontWeight:900,color:T.txt2}}>Artilheiro da Copa<input className="inp" style={inpSt} placeholder="Ex: Mbappe" value={longTermInput.topScorer||''} disabled={champLocked} onChange={e=>setLongTermInput(v=>({...v,topScorer:e.target.value}))}/><span style={{fontSize:10,color:T.txt3,fontWeight:600}}>Vale {LONG_SCORER_PTS} pts</span></label>
+            <label style={{display:'flex',flexDirection:'column',gap:6,fontSize:12,fontWeight:900,color:T.txt2}}>Melhor jogador da Copa<input className="inp" style={inpSt} placeholder="Ex: Vini Jr" value={longTermInput.bestPlayer||''} disabled={champLocked} onChange={e=>setLongTermInput(v=>({...v,bestPlayer:e.target.value}))}/><span style={{fontSize:10,color:T.txt3,fontWeight:600}}>Vale {LONG_PLAYER_PTS} pts</span></label>
+          </div>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,flexWrap:'wrap',marginTop:14,paddingTop:14,borderTop:'1px solid '+T.border}}>
+            <span style={{fontSize:12,color:champLocked?T.err:T.txt3,fontWeight:800}}>{champLocked?'Travado desde '+champLockLabel:'Trava no inicio da Copa: '+champLockLabel}</span>
+            <button className="btn-acc" style={{...btnAcc,minWidth:120,opacity:champLocked?0.65:1}} disabled={champLocked||saving==='longTerm'} onClick={saveLongTerm}>{saving==='longTerm'?'Salvando...':'Salvar'}</button>
+          </div>
+        </div>
+      </>}
       {matchView==='dayPicks'&&<><SectionTitle title="Palpites do Dia" text="Os palpites dos amigos aparecem agrupados por jogo somente no dia da partida, depois que ela comeca ou quando o resultado e lancado."/>{publicPickMatches.length?publicPickMatches.map(m=><div key={m.id} className="lux-card" style={{background:T.card,border:'1px solid '+T.border,borderRadius:16,boxShadow:shadow,overflow:'hidden',marginBottom:12}}><div style={{padding:'14px 16px',borderBottom:'1px solid '+T.border,display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}><strong style={{fontSize:15,color:T.txt1,flex:1}}>{fl(m.home)} {displayTeam(m.home)} x {displayTeam(m.away)} {fl(m.away)}</strong><span style={{fontSize:11,fontWeight:900,color:T.txt1,background:'#F8FAFC',border:'1px solid '+T.border,borderRadius:999,padding:'5px 9px'}}>{parts.filter(uid=>{const pp=(preds[uid]||{})[m.id];return pp&&pp.home!=='';}).length} palpites</span><span style={{fontSize:11,fontWeight:900,color:T.accent,background:T.accentLt,borderRadius:999,padding:'5px 9px'}}>liberado</span><span style={{fontSize:11,color:T.txt3}}>{fTime(m.dt)} - {m.venue}</span></div><div style={{padding:'10px 16px'}}>{parts.length?parts.map(uid=>{const pp=(preds[uid]||{})[m.id];return <div key={uid} style={{display:'flex',alignItems:'center',gap:10,padding:'9px 0',borderTop:'1px solid '+T.border}}><span style={{flex:1,fontSize:13,fontWeight:900,color:uid===me?T.accent:T.txt1}}>{getName(uid)}{uid===me&&<span style={{fontSize:10,color:T.txt3,fontWeight:600}}> - voce</span>}</span><strong style={{fontSize:15,color:pp&&pp.home!==''?T.txt1:T.txt3}}>{pp&&pp.home!==''?pp.home+'x'+pp.away:'sem palpite'}</strong></div>}):<div style={{fontSize:12,color:T.txt3}}>Nenhum participante registrado.</div>}</div></div>):<div className="lux-card" style={{background:T.card,border:'1px solid '+T.border,borderRadius:18,padding:'26px',boxShadow:shadow,textAlign:'center',color:T.txt2}}><div style={{fontSize:34,marginBottom:8}}>...</div><div style={{fontSize:15,fontWeight:900,color:T.txt1,marginBottom:4}}>Nada liberado ainda</div><div style={{fontSize:12,lineHeight:1.55}}>Os palpites gerais aparecem aqui no dia do jogo, depois que a partida comecar ou quando o resultado for lancado.</div></div>}</>}
       <div style={{height:88}}/>
     </div>
@@ -1644,6 +1743,7 @@ function Bolao(){
                 <th style={{padding:'12px 8px',fontSize:12,textAlign:'center'}}>Erros</th>
                 <th style={{padding:'12px 8px',fontSize:12,textAlign:'center'}}>Pts grupos</th>
                 <th style={{padding:'12px 8px',fontSize:12,textAlign:'center'}}>Pts elimin.</th>
+                <th style={{padding:'12px 8px',fontSize:12,textAlign:'center'}}>Longo prazo</th>
                 <th style={{padding:'12px',fontSize:12,textAlign:'right'}}>Total</th>
               </tr>
             </thead>
@@ -1659,6 +1759,7 @@ function Bolao(){
                 <td style={{padding:'12px 8px',textAlign:'center',fontWeight:900,color:p.miss?T.danger:T.txt1}}>{p.miss}</td>
                 <td style={{padding:'12px 8px',textAlign:'center',fontWeight:900}}>{p.groupPts}</td>
                 <td style={{padding:'12px 8px',textAlign:'center',fontWeight:900}}>{p.elimPts}</td>
+                <td style={{padding:'12px 8px',textAlign:'center',fontWeight:900}}>{(p.podiumPts||0)+(p.longTermPts||0)}</td>
                 <td style={{padding:'12px',textAlign:'right',fontSize:22,fontWeight:950,color:T.txt1}}>{p.pts}</td>
               </tr>)}
             </tbody>
@@ -1772,6 +1873,16 @@ function Bolao(){
         <div style={{display:'flex',flexDirection:'column',gap:14}}>
 
           <div className="lux-card" style={{background:T.card,border:'1px solid '+T.border,borderRadius:18,padding:'18px',boxShadow:shadow}}>
+            <SectionTitle title="Oficiais - longo prazo" text="Use no fim da Copa para pontuar campeao, artilheiro e melhor jogador."/>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(170px,1fr))',gap:8,marginBottom:8}}>
+              <select className="inp" style={inpSt} value={adminChampInput} onChange={e=>setAdminChampInput(e.target.value)}><option value="">Campeao oficial...</option>{ALL_TEAMS.map(t=><option key={t} value={t}>{t}</option>)}</select>
+              <input className="inp" style={inpSt} placeholder="Artilheiro oficial" value={officialLongTermInput.topScorer||''} onChange={e=>setOfficialLongTermInput(v=>({...v,topScorer:e.target.value}))}/>
+              <input className="inp" style={inpSt} placeholder="Melhor jogador oficial" value={officialLongTermInput.bestPlayer||''} onChange={e=>setOfficialLongTermInput(v=>({...v,bestPlayer:e.target.value}))}/>
+            </div>
+            <button className="btn-acc" style={{...btnAcc,width:'100%'}} onClick={saveOfficialLongTerm}>{saving==='officialLongTerm'?'Salvando...':'Salvar oficiais de longo prazo'}</button>
+          </div>
+
+          <div className="lux-card" style={{background:T.card,border:'1px solid '+T.border,borderRadius:18,padding:'18px',boxShadow:shadow}}>
             <SectionTitle title="Exportar dados" text="Baixe ranking, palpites e backup para guardar fora do Firebase."/>
             <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:8}}>
               <button className="pill" style={{padding:'10px 12px',borderRadius:12,border:'1px solid '+T.accentMd,background:T.accentLt,color:T.accent,fontSize:12,fontWeight:900,cursor:'pointer'}} onClick={exportRankingCsv}>Ranking CSV</button>
@@ -1824,6 +1935,7 @@ function Bolao(){
 
                 <button onClick={()=>{setTab('matches');setMatchView('knockout');setShowPalpitesMenu(false);}} style={{width:'100%',border:'none',background:'transparent',padding:'13px 18px',display:'flex',gap:12,alignItems:'center',fontSize:14,color:T.txt1,cursor:'pointer',textAlign:'left'}}>⚡ <span>Eliminatórias</span></button>
                 <button onClick={()=>{setTab('matches');setMatchView('dayPicks');setShowPalpitesMenu(false);}} style={{width:'100%',border:'none',background:'transparent',padding:'13px 18px',display:'flex',gap:12,alignItems:'center',fontSize:14,color:T.txt1,cursor:'pointer',textAlign:'left'}}>{'\u{1F440}'} <span>Palpites do Dia</span></button>
+                <button onClick={()=>{setTab('matches');setMatchView('longTerm');setShowPalpitesMenu(false);}} style={{width:'100%',border:'none',background:'transparent',padding:'13px 18px',display:'flex',gap:12,alignItems:'center',fontSize:14,color:T.txt1,cursor:'pointer',textAlign:'left'}}>{'\u{1F3C6}'} <span>Longo Prazo</span></button>
               </div>}
             </div>
             <button onClick={()=>{setTab('ranking');setShowPalpitesMenu(false);}} style={{border:'none',background:'transparent',cursor:'pointer',fontSize:14,color:tab==='ranking'?'#009C3B':'#111827',fontWeight:tab==='ranking'?800:500}}>Ranking</button>
