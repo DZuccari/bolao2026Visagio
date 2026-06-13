@@ -205,7 +205,7 @@ const LONG_SCORER_PTS = 15;
 const LONG_PLAYER_PTS = 15;
 const VICE_PTS = 20;
 const THIRD_PTS = 15;
-const CHAMP_RULE_LOCK_TS = 1781319599999; // 12/06/2026 23:59:59 BRT
+const CHAMP_RULE_LOCK_TS = 1781388000000; // 13/06/2026 19:00 BRT
 const FLAGS = {
   'México':'🇲🇽','África do Sul':'🇿🇦','Coreia do Sul':'🇰🇷','Tchéquia':'🇨🇿',
   'Canadá':'🇨🇦','Bósnia-Herzegovina':'🇧🇦','Catar':'🇶🇦','Suíça':'🇨🇭',
@@ -262,8 +262,8 @@ const BASE_MATCHES = [
   {id:'C5',ph:'Grupos',gr:'C',home:'Escócia',away:'Brasil',dt:'2026-06-24T19:00:00-03:00',venue:'Miami'},
   {id:'C6',ph:'Grupos',gr:'C',home:'Marrocos',away:'Haiti',dt:'2026-06-24T19:00:00-03:00',venue:'Atlanta'},
   {id:'D1',ph:'Grupos',gr:'D',home:'EUA',away:'Paraguai',dt:'2026-06-12T22:00:00-03:00',venue:'Los Angeles'},
-  {id:'D2',ph:'Grupos',gr:'D',home:'Austrália',away:'Turquia',dt:'2026-06-13T01:00:00-03:00',venue:'Vancouver'},
-  {id:'D3',ph:'Grupos',gr:'D',home:'Turquia',away:'Paraguai',dt:'2026-06-19T01:00:00-03:00',venue:'São Francisco'},
+  {id:'D2',ph:'Grupos',gr:'D',home:'Austrália',away:'Turquia',dt:'2026-06-14T01:00:00-03:00',venue:'Vancouver'},
+  {id:'D3',ph:'Grupos',gr:'D',home:'Turquia',away:'Paraguai',dt:'2026-06-20T00:00:00-03:00',venue:'São Francisco'},
   {id:'D4',ph:'Grupos',gr:'D',home:'EUA',away:'Austrália',dt:'2026-06-19T16:00:00-03:00',venue:'Seattle'},
   {id:'D5',ph:'Grupos',gr:'D',home:'Turquia',away:'EUA',dt:'2026-06-25T23:00:00-03:00',venue:'Los Angeles'},
   {id:'D6',ph:'Grupos',gr:'D',home:'Paraguai',away:'Austrália',dt:'2026-06-25T23:00:00-03:00',venue:'São Francisco'},
@@ -275,7 +275,7 @@ const BASE_MATCHES = [
   {id:'E6',ph:'Grupos',gr:'E',home:'Equador',away:'Alemanha',dt:'2026-06-25T17:00:00-03:00',venue:'Nova York'},
   {id:'F1',ph:'Grupos',gr:'F',home:'Países Baixos',away:'Japão',dt:'2026-06-14T17:00:00-03:00',venue:'Dallas'},
   {id:'F2',ph:'Grupos',gr:'F',home:'Suécia',away:'Tunísia',dt:'2026-06-14T23:00:00-03:00',venue:'Monterrey'},
-  {id:'F3',ph:'Grupos',gr:'F',home:'Tunísia',away:'Japão',dt:'2026-06-20T01:00:00-03:00',venue:'Monterrey'},
+  {id:'F3',ph:'Grupos',gr:'F',home:'Tunísia',away:'Japão',dt:'2026-06-21T01:00:00-03:00',venue:'Monterrey'},
   {id:'F4',ph:'Grupos',gr:'F',home:'Países Baixos',away:'Suécia',dt:'2026-06-20T14:00:00-03:00',venue:'Houston'},
   {id:'F5',ph:'Grupos',gr:'F',home:'Japão',away:'Suécia',dt:'2026-06-25T20:00:00-03:00',venue:'Dallas'},
   {id:'F6',ph:'Grupos',gr:'F',home:'Tunísia',away:'Países Baixos',dt:'2026-06-25T20:00:00-03:00',venue:'Kansas City'},
@@ -297,9 +297,9 @@ const BASE_MATCHES = [
   {id:'I4',ph:'Grupos',gr:'I',home:'Noruega',away:'Senegal',dt:'2026-06-22T21:00:00-03:00',venue:'Nova York'},
   {id:'I5',ph:'Grupos',gr:'I',home:'Noruega',away:'França',dt:'2026-06-26T16:00:00-03:00',venue:'Boston'},
   {id:'I6',ph:'Grupos',gr:'I',home:'Senegal',away:'Iraque',dt:'2026-06-26T16:00:00-03:00',venue:'Toronto'},
-  {id:'J1',ph:'Grupos',gr:'J',home:'Áustria',away:'Jordânia',dt:'2026-06-16T01:00:00-03:00',venue:'São Francisco'},
+  {id:'J1',ph:'Grupos',gr:'J',home:'Áustria',away:'Jordânia',dt:'2026-06-17T01:00:00-03:00',venue:'São Francisco'},
   {id:'J2',ph:'Grupos',gr:'J',home:'Argentina',away:'Argélia',dt:'2026-06-16T22:00:00-03:00',venue:'Kansas City'},
-  {id:'J3',ph:'Grupos',gr:'J',home:'Jordânia',away:'Argélia',dt:'2026-06-22T00:00:00-03:00',venue:'São Francisco'},
+  {id:'J3',ph:'Grupos',gr:'J',home:'Jordânia',away:'Argélia',dt:'2026-06-23T00:00:00-03:00',venue:'São Francisco'},
   {id:'J4',ph:'Grupos',gr:'J',home:'Argentina',away:'Áustria',dt:'2026-06-22T14:00:00-03:00',venue:'Dallas'},
   {id:'J5',ph:'Grupos',gr:'J',home:'Argélia',away:'Áustria',dt:'2026-06-27T23:00:00-03:00',venue:'Kansas City'},
   {id:'J6',ph:'Grupos',gr:'J',home:'Jordânia',away:'Argentina',dt:'2026-06-27T23:00:00-03:00',venue:'Dallas'},
@@ -377,7 +377,16 @@ const enrichSchedule=list=>{
 };
 const scheduleMaintenanceUpdates=list=>{
   const updates={};
-  enrichSchedule(list).forEach(next=>{
+  const baseById=Object.fromEntries(BASE_MATCHES.map(m=>[m.id,m]));
+  const normalized=(list||[]).map(match=>{
+    const base=baseById[match&&match.id];
+    if(!base) return match;
+    ['home','away','dt','ph','gr','venue'].forEach(key=>{
+      if(match[key]!==base[key]) updates[`matches/${match.id}/${key}`]=base[key];
+    });
+    return {...match,...base};
+  });
+  enrichSchedule(normalized).forEach(next=>{
     const cur=(list||[]).find(m=>m&&m.id===next.id)||{};
     if(cur.unlockAt!==next.unlockAt) updates[`matches/${next.id}/unlockAt`]=next.unlockAt;
     if(cur.lockAt!==next.lockAt) updates[`matches/${next.id}/lockAt`]=next.lockAt;
@@ -462,7 +471,7 @@ function Bolao(){
   const [matchEdits,setMatchEdits]=useState({});
   const isAdmin = !!(me && adminIds[me]);
   const champLocked = Date.now() >= CHAMP_RULE_LOCK_TS;
-  const champLockLabel = '12/06/2026 \u00e0s 23:59';
+  const champLockLabel = '13/06/2026 \u00e0s 19:00';
   const matchListForUnlock=matches&&matches.length?matches:BASE_MATCHES;
   const dayFirstKickoffByKey=React.useMemo(()=>{
     const out={};
