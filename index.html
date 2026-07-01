@@ -318,14 +318,30 @@ const BASE_MATCHES = [
 ];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function calcPts(pred,result){
+const isKnockoutMatch=m=>m&&m.ph!=='Grupos';
+const validPkWinner=value=>value==='home'||value==='away';
+const pkWinnerText=(m,value)=>value==='home'?displayTeam(m.home):value==='away'?displayTeam(m.away):'';
+const formatScoreWithPk=(m,data)=>{
+  if(!data||data.home===''||data.home===undefined) return '-';
+  const base=String(data.home)+'?'+String(data.away);
+  return isKnockoutMatch(m)&&Number(data.home)===Number(data.away)&&validPkWinner(data.pkWinner)?base+' pen: '+pkWinnerText(m,data.pkWinner):base;
+};
+const outcomeFor=(home,away,pkWinner,match)=>{
+  if(home>away) return 'H';
+  if(home<away) return 'A';
+  if(isKnockoutMatch(match)&&validPkWinner(pkWinner)) return pkWinner==='home'?'H':'A';
+  return 'D';
+};
+function calcPts(pred,result,match=null){
   if(!result||result.home===''||result.away==='') return null;
   const ph=+pred.home,pa=+pred.away,rh=+result.home,ra=+result.away;
-  if(isNaN(ph)||isNaN(pa)) return null;
-  const predOutcome=ph>pa?'H':ph<pa?'A':'D';
-  const realOutcome=rh>ra?'H':rh<ra?'A':'D';
+  if(isNaN(ph)||isNaN(pa)||isNaN(rh)||isNaN(ra)) return null;
+  const predOutcome=outcomeFor(ph,pa,pred.pkWinner,match);
+  const realOutcome=outcomeFor(rh,ra,result.pkWinner,match);
   const oneScore=ph===rh||pa===ra;
-  if(ph===rh&&pa===ra) return 7;
+  const exactScore=ph===rh&&pa===ra;
+  const needsPkForExact=isKnockoutMatch(match)&&ph===pa&&rh===ra&&validPkWinner(result.pkWinner);
+  if(exactScore&&(!needsPkForExact||pred.pkWinner===result.pkWinner)) return 7;
   if(predOutcome===realOutcome&&oneScore) return 4;
   if(predOutcome===realOutcome) return 3;
   if(oneScore) return 1;
@@ -401,6 +417,16 @@ const parseScore=value=>{
   if(!Number.isInteger(n)||n<0||n>20) return null;
   return n;
 };
+const buildScorePayload=(m,input,{label='Palpite'}={})=>{
+  const home=parseScore(input?.home),away=parseScore(input?.away);
+  if(home===null||away===null) return {error:label+' inv?lido (0 a 20).'};
+  const payload={home,away};
+  if(isKnockoutMatch(m)&&home===away){
+    if(!validPkWinner(input?.pkWinner)) return {error:'Escolha quem vence nos p?naltis.'};
+    payload.pkWinner=input.pkWinner;
+  }
+  return {payload};
+};
 const parseCsvLine=(line,delimiter=',')=>{
   const out=[];
   let cur='';
@@ -424,6 +450,23 @@ const sec={fontSize:12,fontWeight:700,color:T.txt3,marginBottom:10,marginTop:16,
 const inpSt={background:T.bg,border:`1.5px solid ${T.border}`,borderRadius:10,color:T.txt1,fontSize:13,outline:'none',padding:'10px 12px',width:'100%',boxSizing:'border-box'};
 const btnAcc={background:T.accent,color:'#fff',border:'none',borderRadius:10,fontSize:13,fontWeight:700,cursor:'pointer',padding:'10px 18px'};
 const scoreInpSt={width:44,height:44,textAlign:'center',borderRadius:10,border:`1.5px solid ${T.border}`,background:T.bg,color:T.txt1,fontSize:20,fontWeight:800,outline:'none'};
+
+// ── Day Group (must be outside Bolao to preserve open state across re-renders) ─
+const DayGroup=({groupKey,initialOpen,label,total,editCount,children})=>{
+  const [open,setOpen]=useState(initialOpen);
+  return(
+    <details open={open} onToggle={e=>setOpen(e.currentTarget.open)} style={{marginBottom:10}}>
+      <summary style={{listStyle:'none',cursor:'pointer',background:T.card,border:'1px solid '+T.border,borderRadius:12,padding:'12px 14px',boxShadow:shadow,display:'flex',alignItems:'center',gap:12}}>
+        <div style={{flex:1}}>
+          <div style={{fontSize:13,fontWeight:800,color:T.txt1,textTransform:'capitalize'}}>{label}</div>
+          <div style={{fontSize:11,color:T.txt3,marginTop:2}}>{total} jogo(s) · {editCount} aberto(s)</div>
+        </div>
+        <span style={{fontSize:15,color:T.txt3}}>⌄</span>
+      </summary>
+      <div style={{paddingTop:10}}>{children}</div>
+    </details>
+  );
+};
 
 // ── Main App ──────────────────────────────────────────────────────────────────
 function Bolao(){
@@ -801,15 +844,15 @@ function Bolao(){
 
   const savePred=async(id)=>{
     const m=matches.find(x=>x.id===id);
-    if(!m){showToast('Jogo não encontrado.',false);return;}
+    if(!m){showToast('Jogo n?o encontrado.',false);return;}
     if(!predictionOpen(m)){showToast('Palpite libera em '+unlockLabel(m)+'.',false);return;}
     if(matchLocked(m)){showToast('Palpite fechado para este jogo.',false);return;}
     const p=pi[id]||{home:'',away:''};
-    const home=parseScore(p.home),away=parseScore(p.away);
-    if(home===null||away===null){showToast('Placar inválido (0 a 20).',false);return;}
+    const built=buildScorePayload(m,p,{label:'Placar'});
+    if(built.error){showToast(built.error,false);return;}
     setSaving(id);
     try{
-      await ref(`predictions/${me}/${id}`).set({home,away});
+      await ref('predictions/'+me+'/'+id).set(built.payload);
       showToast('Palpite salvo!');
     }catch{
       showToast('Erro ao salvar palpite.',false);
@@ -817,31 +860,29 @@ function Bolao(){
       setSaving(null);
     }
   };
-
   const saveGroupPreds=async(groupMatches)=>{
     const openMatches=groupMatches.filter(m=>canEditMatch(m));
-    if(openMatches.length===0){showToast('Nenhum jogo deste grupo está liberado agora.',false);return;}
+    if(openMatches.length===0){showToast('Nenhum jogo deste grupo est? liberado agora.',false);return;}
     const updates={};
     for(const m of openMatches){
       const p=pi[m.id]||{home:'',away:''};
-      const home=parseScore(p.home),away=parseScore(p.away);
-      if(home===null||away===null){
-        showToast(`Preencha placares válidos no Grupo ${m.gr}.`,false);
+      const built=buildScorePayload(m,p,{label:'Placar'});
+      if(built.error){
+        showToast('Preencha placares v?lidos no Grupo '+m.gr+'.',false);
         return;
       }
-      updates[`predictions/${me}/${m.id}`]={home,away};
+      updates['predictions/'+me+'/'+m.id]=built.payload;
     }
-    setSaving(`group-${groupMatches[0]?.gr||'x'}`);
+    setSaving('group-'+(groupMatches[0]?.gr||'x'));
     try{
       await db.ref(REF_ROOT).update(updates);
-      showToast(`Grupo ${groupMatches[0]?.gr||''} salvo!`);
+      showToast('Grupo '+(groupMatches[0]?.gr||'')+' salvo!');
     }catch{
       showToast('Erro ao salvar grupo.',false);
     }finally{
       setSaving(null);
     }
   };
-
   const saveChamp=async()=>{
     if(champLocked){showToast('Palpite de campeão bloqueado após o início da Copa.',false);return;}
     if(!champInput) return;
@@ -910,14 +951,17 @@ function Bolao(){
     const m=matches.find(x=>x.id===id);
     if(!m){showToast('Jogo nao encontrado.',false);return;}
     const res=ri[id]||{home:'',away:''};
-    const home=parseScore(res.home),away=parseScore(res.away);
-    if(home===null||away===null){showToast('Resultado invalido (0 a 20).',false);return;}
-    const previous=m.result&&m.result.home!==''&&m.result.home!==undefined?{home:m.result.home,away:m.result.away}:null;
-    const msg=(previous?'Alterar resultado de ':'Salvar resultado de ')+displayTeam(m.home)+' '+home+' x '+away+' '+displayTeam(m.away)+'?'+(previous?' Anterior: '+previous.home+' x '+previous.away+'.':'');
+    const built=buildScorePayload(m,res,{label:'Resultado'});
+    if(built.error){showToast(built.error,false);return;}
+    const {home,away}=built.payload;
+    const previous=m.result&&m.result.home!==''&&m.result.home!==undefined?{home:m.result.home,away:m.result.away,pkWinner:m.result.pkWinner||''}:null;
+    const pkTxt=built.payload.pkWinner?' (p?naltis: '+pkWinnerText(m,built.payload.pkWinner)+')':'';
+    const prevTxt=previous?' Anterior: '+formatScoreWithPk(m,previous)+'.':'';
+    const msg=(previous?'Alterar resultado de ':'Salvar resultado de ')+displayTeam(m.home)+' '+home+' x '+away+' '+displayTeam(m.away)+pkTxt+'?'+prevTxt;
     if(!window.confirm(msg)) return;
     try{
-      await ref('matches/'+id+'/result').set({home,away});
-      await logAdminAction('save_result',{matchId:id,home,away,previous,match:displayTeam(m.home)+' x '+displayTeam(m.away)});
+      await ref('matches/'+id+'/result').set(built.payload);
+      await logAdminAction('save_result',{matchId:id,...built.payload,previous,match:displayTeam(m.home)+' x '+displayTeam(m.away)});
       showToast('Resultado salvo!');
     }catch{
       showToast('Erro ao salvar resultado.',false);
@@ -1102,16 +1146,16 @@ function Bolao(){
     ...board.map((p,i)=>[i+1,p.name,p.pts,p.exact,p.win,p.miss,p.groupPts,p.elimPts,(p.podiumPts||0)+(p.longTermPts||0),p.total])
   ]);
   const exportPredictionsCsv=()=>downloadCsv('palpites-bolao.csv',[
-    ['participante','uid','jogo_id','fase','grupo','casa','fora','data','palpite_casa','palpite_fora','resultado_casa','resultado_fora','pontos'],
+    ['participante','uid','jogo_id','fase','grupo','casa','fora','data','palpite_casa','palpite_fora','vencedor_penaltis_palpite','resultado_casa','resultado_fora','vencedor_penaltis_resultado','pontos'],
     ...parts.flatMap(uid=>matches.map(m=>{
       const p=(preds[uid]||{})[m.id]||{};
-      const pts=calcPts(p,m.result);
-      return [getName(uid),uid,m.id,m.ph,m.gr||'',displayTeam(m.home),displayTeam(m.away),m.dt,p.home??'',p.away??'',m.result?.home??'',m.result?.away??'',pts??''];
+      const pts=calcPts(p,m.result,m);
+      return [getName(uid),uid,m.id,m.ph,m.gr||'',displayTeam(m.home),displayTeam(m.away),m.dt,p.home??'',p.away??'',p.pkWinner?pkWinnerText(m,p.pkWinner):'',m.result?.home??'',m.result?.away??'',m.result?.pkWinner?pkWinnerText(m,m.result.pkWinner):'',pts??''];
     }))
   ]);
   const exportMatchesCsv=()=>downloadCsv('jogos-resultados-bolao.csv',[
-    ['jogo_id','fase','grupo','casa','fora','data','local','abre_em','fecha_em','resultado_casa','resultado_fora'],
-    ...matches.map(m=>[m.id,m.ph,m.gr||'',displayTeam(m.home),displayTeam(m.away),m.dt,m.venue||'',m.unlockAt||'',m.lockAt||'',m.result?.home??'',m.result?.away??''])
+    ['jogo_id','fase','grupo','casa','fora','data','local','abre_em','fecha_em','resultado_casa','resultado_fora','vencedor_penaltis'],
+    ...matches.map(m=>[m.id,m.ph,m.gr||'',displayTeam(m.home),displayTeam(m.away),m.dt,m.venue||'',m.unlockAt||'',m.lockAt||'',m.result?.home??'',m.result?.away??'',m.result?.pkWinner?pkWinnerText(m,m.result.pkWinner):''])
   ]);
   const exportBackupJson=()=>downloadTextFile('backup-bolao.json',JSON.stringify({exportedAt:new Date().toISOString(),root:REF_ROOT,matches,predictions:preds,participants:partMeta,admins:adminIds,champPreds,podiumPreds,bracketPreds,officialPodium,officialBracket,officialLongTerm,champWinner,longTermPreds,audit},null,2),'application/json;charset=utf-8');
 
@@ -1233,7 +1277,7 @@ function Bolao(){
     let gamePts=0,groupPts=0,elimPts=0,exact=0,win=0,miss=0,total=0;
     scopeMatches.forEach(m=>{
       const p=(preds[uid]||{})[m.id]; if(!p) return;
-      const x=calcPts(p,m.result); if(x===null) return;
+      const x=calcPts(p,m.result,m); if(x===null) return;
       total++;gamePts+=x;if(m.ph==='Grupos') groupPts+=x; else elimPts+=x;
       if(x===7)exact++;else if(x===4||x===3)win++;else miss++;
     });
@@ -1321,7 +1365,7 @@ function Bolao(){
     let pts=0,exact=0,win=0,miss=0,total=0;
     matches.forEach(m=>{
       const p=(preds[me]||{})[m.id]; if(!p) return;
-      const x=calcPts(p,m.result); if(x===null) return;
+      const x=calcPts(p,m.result,m); if(x===null) return;
       total++;pts+=x;if(x===7)exact++;else if(x===4||x===3)win++;else miss++;
     });
     const mine=board.find(p=>p.uid===me);
@@ -1392,7 +1436,7 @@ function Bolao(){
   };
   const myScoredBreakdown=scoredMatches.map(m=>{
     const pred=myPredMap[m.id];
-    const pts=pred?calcPts(pred,m.result):null;
+    const pts=pred?calcPts(pred,m.result,m):null;
     const meta=scoreMeta(pts);
     return {m,pred,pts,meta};
   }).sort((a,b)=>new Date(b.m.dt)-new Date(a.m.dt));
@@ -1404,7 +1448,7 @@ function Bolao(){
     match:m,
     rows:[...parts].map(uid=>{
       const pred=(preds[uid]||{})[m.id];
-      const pts=pred?calcPts(pred,m.result):null;
+      const pts=pred?calcPts(pred,m.result,m):null;
       return {uid,name:getName(uid),pred,pts:pts??0,hasPred:!!pred,meta:scoreMeta(pts)};
     }).filter(row=>row.hasPred).sort((a,b)=>b.pts-a.pts||a.name.localeCompare(b.name,'pt-BR'))
   })).filter(item=>item.rows.length>0).sort((a,b)=>new Date(b.match.dt)-new Date(a.match.dt));
@@ -1412,7 +1456,7 @@ function Bolao(){
     const rows=[...parts].map(uid=>{
       const pred=(preds[uid]||{})[m.id];
       const hasPred=!!pred&&pred.home!==''&&pred.home!==undefined&&pred.away!==''&&pred.away!==undefined;
-      const pts=hasPred?calcPts(pred,m.result):null;
+      const pts=hasPred?calcPts(pred,m.result,m):null;
       return {uid,name:getName(uid),pred,pts:pts??0,hasPred,meta:scoreMeta(pts)};
     });
     const withPred=rows.filter(r=>r.hasPred);
@@ -1497,19 +1541,28 @@ function Bolao(){
   );
 
   // ── Match Card ──────────────────────────────────────────────────────────────
+  const PenaltyButtons=({match,value,onChange})=> (
+    <div style={{display:'flex',alignItems:'center',gap:5,flexWrap:'wrap',justifyContent:'center',maxWidth:180}}>
+      <span style={{fontSize:9,color:T.txt3,fontWeight:900,textTransform:'uppercase',letterSpacing:.4}}>P?naltis</span>
+      {['home','away'].map(side=><button key={side} type="button" onClick={()=>onChange(side)} style={{border:'1px solid '+(value===side?T.accent:T.border),background:value===side?T.accentLt:T.bg,color:value===side?T.accent:T.txt2,borderRadius:999,padding:'4px 8px',fontSize:10,fontWeight:900,cursor:'pointer',maxWidth:76,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{pkWinnerText(match,side)}</button>)}
+    </div>
+  );
+
   const MatchCard=({m})=>{
     const st=matchLocked(m);
     const open=predictionOpen(m);
     const editable=canEditMatch(m);
     const hasR=m.result&&m.result.home!=='';
     const myS=(preds[me]||{})[m.id];
-    const pts=myS?calcPts(myS,m.result):null;
+    const pts=myS?calcPts(myS,m.result,m):null;
     const inp=pi[m.id]||{home:'',away:''};
     const hasPred=myS&&myS.home!=='';
     const ptBg=pts===7?T.okBg:(pts===4||pts===3)?T.halfBg:pts===1?'#DBEAFE':pts===0?T.errBg:null;
     const ptCol=pts===7?T.ok:(pts===4||pts===3)?T.half:pts===1?'#1D4ED8':pts===0?T.err:null;
     const ptLabel=pts===7?'⭐ Exato':pts===4?'✓ Vencedor + gol':pts===3?'✓ Vencedor':pts===1?'⚽ Gol':pts===0?'✗ Errou':null;
-    const dirty=String(inp.home??'')!==String(myS?.home??'')||String(inp.away??'')!==String(myS?.away??'');
+    const scoreHome=parseScore(inp.home),scoreAway=parseScore(inp.away);
+    const showPkPicker=editable&&isKnockoutMatch(m)&&scoreHome!==null&&scoreAway!==null&&scoreHome===scoreAway;
+    const dirty=String(inp.home??'')!==String(myS?.home??'')||String(inp.away??'')!==String(myS?.away??'')||String(inp.pkWinner??'')!==String(myS?.pkWinner??'');
     const statusColor=hasR?T.gold:st?'#1D4ED8':!open?T.txt3:hasPred?T.accent:T.half;
     const statusBg=hasR?T.goldBg:st?'#DBEAFE':!open?'#F1F5F9':hasPred?T.accentLt:T.halfBg;
     const statusText=hasR?'Resultado':st?'Fechado':!open?'Bloqueado':hasPred?'Salvo':'Aberto';
@@ -1538,12 +1591,16 @@ function Bolao(){
                 <div style={{fontSize:24,fontWeight:900,color:T.gold,background:T.goldBg,width:40,height:40,borderRadius:10,display:'flex',alignItems:'center',justifyContent:'center'}}>{m.result.away}</div>
               </div>
             )}
+            {hasR&&isKnockoutMatch(m)&&Number(m.result.home)===Number(m.result.away)&&validPkWinner(m.result.pkWinner)&&<div style={{fontSize:10,color:T.gold,fontWeight:900}}>P?naltis: {pkWinnerText(m,m.result.pkWinner)}</div>}
             {editable?(
-              <div style={{display:'flex',alignItems:'center',gap:6}}>
-                <input className="score-inp" type="number" min="0" max="20" placeholder="–" style={scoreInpSt} value={inp.home} onChange={e=>setPi(p=>({...p,[m.id]:{...p[m.id],home:e.target.value}}))}/>
-                <span style={{color:T.borderMd,fontWeight:700}}>×</span>
-                <input className="score-inp" type="number" min="0" max="20" placeholder="–" style={scoreInpSt} value={inp.away} onChange={e=>setPi(p=>({...p,[m.id]:{...p[m.id],away:e.target.value}}))}/>
-              </div>
+              <>
+                <div style={{display:'flex',alignItems:'center',gap:6}}>
+                  <input className="score-inp" type="number" min="0" max="20" placeholder="?" style={scoreInpSt} value={inp.home} onChange={e=>setPi(p=>({...p,[m.id]:{...p[m.id],home:e.target.value}}))}/>
+                  <span style={{color:T.borderMd,fontWeight:700}}>?</span>
+                  <input className="score-inp" type="number" min="0" max="20" placeholder="?" style={scoreInpSt} value={inp.away} onChange={e=>setPi(p=>({...p,[m.id]:{...p[m.id],away:e.target.value}}))}/>
+                </div>
+                {showPkPicker&&<PenaltyButtons match={m} value={inp.pkWinner||''} onChange={side=>setPi(p=>({...p,[m.id]:{...p[m.id],pkWinner:side}}))}/>}
+              </>
             ):(
               !hasR&&<span style={{fontSize:13,color:T.txt3,fontWeight:600,letterSpacing:2}}>VS</span>
             )}
@@ -1565,8 +1622,8 @@ function Bolao(){
           <div style={{borderTop:`1px solid ${T.border}`,padding:'8px 14px',display:'flex',flexWrap:'wrap',gap:5}}>
             {parts.filter(p=>p!==me).map(p=>{
               const pp=(preds[p]||{})[m.id];
-              const x=pp?calcPts(pp,m.result):null;
-              return <span key={p} style={{fontSize:10,fontWeight:600,padding:'3px 9px',borderRadius:16,background:x===7?T.okBg:(x===4||x===3)?T.halfBg:x===1?'#DBEAFE':x===0?T.errBg:T.bg,color:x===7?T.ok:(x===4||x===3)?T.half:x===1?'#1D4ED8':x===0?T.err:T.txt3,border:`1px solid ${T.border}`}}>{getName(p)}: {pp&&pp.home!==''?`${pp.home}×${pp.away}`:'–'}</span>;
+              const x=pp?calcPts(pp,m.result,m):null;
+              return <span key={p} style={{fontSize:10,fontWeight:600,padding:'3px 9px',borderRadius:16,background:x===7?T.okBg:(x===4||x===3)?T.halfBg:x===1?'#DBEAFE':x===0?T.errBg:T.bg,color:x===7?T.ok:(x===4||x===3)?T.half:x===1?'#1D4ED8':x===0?T.err:T.txt3,border:`1px solid ${T.border}`}}>{getName(p)}: {pp&&pp.home!==''?formatScoreWithPk(m,pp):'?'}</span>;
             })}
           </div>
         )}
@@ -1744,8 +1801,8 @@ function Bolao(){
       <div style={{marginBottom:22}}><div style={{fontSize:13,color:T.txt3,marginBottom:8}}>Seus palpites</div><h1 style={{fontSize:30,lineHeight:1.1,color:T.txt1,letterSpacing:-.8,marginBottom:8}}>{matchView==='groups'?'Palpites - Fase de Grupos':matchView==='dayPicks'?'Palpites do Dia':matchView==='longTerm'?'Palpites de Longo Prazo':'Palpites - Eliminatorias'}</h1><p style={{fontSize:15,color:T.txt2,lineHeight:1.6,maxWidth:760}}>Os jogos de cada dia liberam juntos 2 dias antes do primeiro jogo do dia, e fecham quando cada partida começa.</p></div>
       <div className="lux-card" style={{background:T.card,border:'1px solid '+T.border,borderRadius:18,padding:'16px',boxShadow:shadow,marginBottom:18}}><div className="info-grid" style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10,marginBottom:14}}><StatTile value={matchView==='longTerm'?(longTermDone?3:[champPreds[me],longTermMine.topScorer,longTermMine.bestPlayer].filter(Boolean).length):matchView==='groups'?savedGroupPredCount:savedKnockoutPredCount} label="salvos" color={T.accent} bg={T.accentLt}/><StatTile value={matchView==='longTerm'?Math.max(0,3-[champPreds[me],longTermMine.topScorer,longTermMine.bestPlayer].filter(Boolean).length):matchView==='groups'?Math.max(0,groupMatches.length-savedGroupPredCount):Math.max(0,knockoutMatches.length-savedKnockoutPredCount)} label="faltando" color={T.half} bg={T.halfBg}/><StatTile value={matchView==='longTerm'?(champLocked?0:3):matchView==='groups'?groupAvailablePendingCount:knockoutAvailablePendingCount} label="para palpitar" color="#1D4ED8" bg="#DBEAFE"/><StatTile value="48h" label="janela" color={T.txt1} bg={T.bg}/></div><div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}><button className="pill" style={{padding:'10px 14px',borderRadius:999,border:'1px solid '+(!onlyMissing?T.accent:T.border),fontSize:12,fontWeight:900,background:!onlyMissing?T.accentLt:T.card,color:!onlyMissing?T.accent:T.txt2,cursor:'pointer'}} onClick={()=>setOnlyMissing(false)}>Todos os jogos</button><button className="pill" style={{padding:'10px 14px',borderRadius:999,border:'1px solid '+(onlyMissing?T.half:T.border),fontSize:12,fontWeight:900,background:onlyMissing?T.halfBg:T.card,color:onlyMissing?T.half:T.txt2,cursor:'pointer'}} onClick={()=>setOnlyMissing(true)}>Dispon&iacute;veis para palpitar</button></div></div>
       <div style={{display:'flex',alignItems:'center',borderBottom:'1px solid '+T.border,marginBottom:18,gap:18,flexWrap:'wrap'}}><button style={{border:'none',borderBottom:'2px solid '+(matchView==='groups'?T.accent:'transparent'),background:'transparent',padding:'0 0 12px',fontSize:14,fontWeight:matchView==='groups'?900:800,color:matchView==='groups'?T.accent:T.txt3,cursor:'pointer'}} onClick={()=>setMatchView('groups')}>Fase de Grupos</button><button style={{border:'none',borderBottom:'2px solid '+(matchView==='knockout'?T.accent:'transparent'),background:'transparent',padding:'0 0 12px',fontSize:14,fontWeight:matchView==='knockout'?900:800,color:matchView==='knockout'?T.accent:T.txt3,cursor:'pointer'}} onClick={()=>{setMatchView('knockout');setOnlyMissing(false);}}>Eliminatórias</button><button style={{border:'none',borderBottom:'2px solid '+(matchView==='dayPicks'?T.accent:'transparent'),background:'transparent',padding:'0 0 12px',fontSize:14,fontWeight:matchView==='dayPicks'?900:800,color:matchView==='dayPicks'?T.accent:T.txt3,cursor:'pointer'}} onClick={()=>{setMatchView('dayPicks');setOnlyMissing(false);}}>Palpites do Dia</button><button style={{border:'none',borderBottom:'2px solid '+(matchView==='longTerm'?T.accent:'transparent'),background:'transparent',padding:'0 0 12px',fontSize:14,fontWeight:matchView==='longTerm'?900:800,color:matchView==='longTerm'?T.accent:T.txt3,cursor:'pointer'}} onClick={()=>{setMatchView('longTerm');setOnlyMissing(false);}}>Longo Prazo</button></div>
-      {matchView==='groups'&&<><SectionTitle title="Fase de grupos por dia" text="Abra o dia da Copa e preencha os jogos que já estiverem liberados."/>{groupPredictionDayGroups.map((group,idx)=><details key={group.key} open={idx===0||group.matches.some(m=>canEditMatch(m))} style={{marginBottom:10}}><summary style={{listStyle:'none',cursor:'pointer',background:T.card,border:'1px solid '+T.border,borderRadius:12,padding:'12px 14px',boxShadow:shadow,display:'flex',alignItems:'center',gap:12}}><div style={{flex:1}}><div style={{fontSize:13,fontWeight:800,color:T.txt1,textTransform:'capitalize'}}>{group.label}</div><div style={{fontSize:11,color:T.txt3,marginTop:2}}>{group.matches.length} jogo(s) · {group.matches.filter(m=>canEditMatch(m)).length} aberto(s)</div></div><span style={{fontSize:15,color:T.txt3}}>⌄</span></summary><div style={{paddingTop:10}}>{group.matches.map(m=><MatchCard key={m.id} m={m}/>)}</div></details>)}</>}
-      {matchView==='knockout'&&<>{knockoutPredictionDayGroups.length?<><SectionTitle title="Eliminatórias" text="Os confrontos continuam sendo palpites de placar, também liberados 2 dias antes."/>{knockoutPredictionDayGroups.map((group,idx)=><details key={group.key} open={idx===0||group.matches.some(m=>canEditMatch(m))} style={{marginBottom:10}}><summary style={{listStyle:'none',cursor:'pointer',background:T.card,border:'1px solid '+T.border,borderRadius:12,padding:'12px 14px',boxShadow:shadow,display:'flex',alignItems:'center',gap:12}}><div style={{flex:1}}><div style={{fontSize:13,fontWeight:800,color:T.txt1,textTransform:'capitalize'}}>{group.label}</div><div style={{fontSize:11,color:T.txt3,marginTop:2}}>{group.matches.length} jogo(s) · {group.matches.filter(m=>canEditMatch(m)).length} aberto(s)</div></div><span style={{fontSize:15,color:T.txt3}}>⌄</span></summary><div style={{paddingTop:10}}>{group.matches.map(m=><MatchCard key={m.id} m={m}/>)}</div></details>)}</>:<div className="lux-card" style={{background:T.card,border:'1px solid '+T.border,borderRadius:18,padding:'26px',boxShadow:shadow,textAlign:'center',color:T.txt2}}><div style={{fontSize:34,marginBottom:8}}>🏟️</div><div style={{fontSize:15,fontWeight:900,color:T.txt1,marginBottom:4}}>Eliminatórias ainda não cadastradas</div><div style={{fontSize:12,lineHeight:1.55}}>Quando os confrontos do mata-mata forem definidos, eles aparecem aqui.</div></div>}</>}
+      {matchView==='groups'&&<><SectionTitle title="Fase de grupos por dia" text="Abra o dia da Copa e preencha os jogos que já estiverem liberados."/>{groupPredictionDayGroups.map((group,idx)=><DayGroup key={group.key} initialOpen={idx===0||group.matches.some(m=>canEditMatch(m))} label={group.label} total={group.matches.length} editCount={group.matches.filter(m=>canEditMatch(m)).length}>{group.matches.map(m=><MatchCard key={m.id} m={m}/>)}</DayGroup>)}</>}
+      {matchView==='knockout'&&<>{knockoutPredictionDayGroups.length?<><SectionTitle title="Eliminatórias" text="Os confrontos continuam sendo palpites de placar, também liberados 2 dias antes."/>{knockoutPredictionDayGroups.map((group,idx)=><DayGroup key={group.key} initialOpen={idx===0||group.matches.some(m=>canEditMatch(m))} label={group.label} total={group.matches.length} editCount={group.matches.filter(m=>canEditMatch(m)).length}>{group.matches.map(m=><MatchCard key={m.id} m={m}/>)}</DayGroup>)}</>:<div className="lux-card" style={{background:T.card,border:'1px solid '+T.border,borderRadius:18,padding:'26px',boxShadow:shadow,textAlign:'center',color:T.txt2}}><div style={{fontSize:34,marginBottom:8}}>🏟️</div><div style={{fontSize:15,fontWeight:900,color:T.txt1,marginBottom:4}}>Eliminatórias ainda não cadastradas</div><div style={{fontSize:12,lineHeight:1.55}}>Quando os confrontos do mata-mata forem definidos, eles aparecem aqui.</div></div>}</>}
       {matchView==='longTerm'&&<>
         <SectionTitle title="Palpites de Longo Prazo" text={champLocked?'Esses palpites fecharam no inicio da Copa.':'Preencha antes do inicio do primeiro jogo da Copa.'}/>
         <div className="lux-card" style={{background:T.card,border:'1px solid '+T.border,borderRadius:18,padding:'18px',boxShadow:shadow,marginBottom:14}}>
@@ -1760,7 +1817,7 @@ function Bolao(){
           </div>
         </div>
       </>}
-      {matchView==='dayPicks'&&<><SectionTitle title="Palpites do Dia" text="Os palpites dos amigos aparecem agrupados por jogo somente no dia da partida, depois que ela comeca ou quando o resultado e lancado."/>{publicPickMatches.length?publicPickMatches.map(m=><div key={m.id} className="lux-card" style={{background:T.card,border:'1px solid '+T.border,borderRadius:16,boxShadow:shadow,overflow:'hidden',marginBottom:12}}><div style={{padding:'14px 16px',borderBottom:'1px solid '+T.border,display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}><strong style={{fontSize:15,color:T.txt1,flex:1}}>{fl(m.home)} {displayTeam(m.home)} x {displayTeam(m.away)} {fl(m.away)}</strong><span style={{fontSize:11,fontWeight:900,color:T.txt1,background:'#F8FAFC',border:'1px solid '+T.border,borderRadius:999,padding:'5px 9px'}}>{parts.filter(uid=>{const pp=(preds[uid]||{})[m.id];return pp&&pp.home!=='';}).length} palpites</span><span style={{fontSize:11,fontWeight:900,color:T.accent,background:T.accentLt,borderRadius:999,padding:'5px 9px'}}>liberado</span><span style={{fontSize:11,color:T.txt3}}>{fTime(m.dt)} - {m.venue}</span></div><div style={{padding:'10px 16px'}}>{parts.length?parts.map(uid=>{const pp=(preds[uid]||{})[m.id];return <div key={uid} style={{display:'flex',alignItems:'center',gap:10,padding:'9px 0',borderTop:'1px solid '+T.border}}><span style={{flex:1,fontSize:13,fontWeight:900,color:uid===me?T.accent:T.txt1}}>{getName(uid)}{uid===me&&<span style={{fontSize:10,color:T.txt3,fontWeight:600}}> - voce</span>}</span><strong style={{fontSize:15,color:pp&&pp.home!==''?T.txt1:T.txt3}}>{pp&&pp.home!==''?pp.home+'x'+pp.away:'sem palpite'}</strong></div>}):<div style={{fontSize:12,color:T.txt3}}>Nenhum participante registrado.</div>}</div></div>):<div className="lux-card" style={{background:T.card,border:'1px solid '+T.border,borderRadius:18,padding:'26px',boxShadow:shadow,textAlign:'center',color:T.txt2}}><div style={{fontSize:34,marginBottom:8}}>...</div><div style={{fontSize:15,fontWeight:900,color:T.txt1,marginBottom:4}}>Nada liberado ainda</div><div style={{fontSize:12,lineHeight:1.55}}>Os palpites gerais aparecem aqui no dia do jogo, depois que a partida comecar ou quando o resultado for lancado.</div></div>}</>}
+      {matchView==='dayPicks'&&<><SectionTitle title="Palpites do Dia" text="Os palpites dos amigos aparecem agrupados por jogo somente no dia da partida, depois que ela comeca ou quando o resultado e lancado."/>{publicPickMatches.length?publicPickMatches.map(m=><div key={m.id} className="lux-card" style={{background:T.card,border:'1px solid '+T.border,borderRadius:16,boxShadow:shadow,overflow:'hidden',marginBottom:12}}><div style={{padding:'14px 16px',borderBottom:'1px solid '+T.border,display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}><strong style={{fontSize:15,color:T.txt1,flex:1}}>{fl(m.home)} {displayTeam(m.home)} x {displayTeam(m.away)} {fl(m.away)}</strong><span style={{fontSize:11,fontWeight:900,color:T.txt1,background:'#F8FAFC',border:'1px solid '+T.border,borderRadius:999,padding:'5px 9px'}}>{parts.filter(uid=>{const pp=(preds[uid]||{})[m.id];return pp&&pp.home!=='';}).length} palpites</span><span style={{fontSize:11,fontWeight:900,color:T.accent,background:T.accentLt,borderRadius:999,padding:'5px 9px'}}>liberado</span><span style={{fontSize:11,color:T.txt3}}>{fTime(m.dt)} - {m.venue}</span></div><div style={{padding:'10px 16px'}}>{parts.length?parts.map(uid=>{const pp=(preds[uid]||{})[m.id];return <div key={uid} style={{display:'flex',alignItems:'center',gap:10,padding:'9px 0',borderTop:'1px solid '+T.border}}><span style={{flex:1,fontSize:13,fontWeight:900,color:uid===me?T.accent:T.txt1}}>{getName(uid)}{uid===me&&<span style={{fontSize:10,color:T.txt3,fontWeight:600}}> - voce</span>}</span><strong style={{fontSize:15,color:pp&&pp.home!==''?T.txt1:T.txt3}}>{pp&&pp.home!==''?formatScoreWithPk(m,pp):'sem palpite'}</strong></div>}):<div style={{fontSize:12,color:T.txt3}}>Nenhum participante registrado.</div>}</div></div>):<div className="lux-card" style={{background:T.card,border:'1px solid '+T.border,borderRadius:18,padding:'26px',boxShadow:shadow,textAlign:'center',color:T.txt2}}><div style={{fontSize:34,marginBottom:8}}>...</div><div style={{fontSize:15,fontWeight:900,color:T.txt1,marginBottom:4}}>Nada liberado ainda</div><div style={{fontSize:12,lineHeight:1.55}}>Os palpites gerais aparecem aqui no dia do jogo, depois que a partida comecar ou quando o resultado for lancado.</div></div>}</>}
       <div style={{height:88}}/>
     </div>
   );
@@ -1822,8 +1879,8 @@ function Bolao(){
         </div>
         {myScoredBreakdown.length?<details style={{borderTop:'1px solid '+T.border,paddingTop:12}}><summary style={{listStyle:'none',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,padding:'12px 14px',border:'1px solid '+T.border,borderRadius:12,background:T.bg}}><span><strong style={{fontSize:13,color:T.txt1}}>Ver jogos pontuados</strong><span style={{display:'block',fontSize:11,color:T.txt3,marginTop:2}}>{myScoredBreakdown.length} jogo{myScoredBreakdown.length!==1?'s':''} com resultado</span></span><span style={{fontSize:16,color:T.txt3}}>v</span></summary><div style={{paddingTop:10}}>{myScoredBreakdown.map(item=><div key={item.m.id} style={{display:'grid',gridTemplateColumns:'1.3fr .75fr .75fr auto',gap:10,alignItems:'center',padding:'11px 0',borderTop:'1px solid '+T.border}}>
           <div style={{minWidth:0}}><div style={{fontSize:13,fontWeight:950,color:T.txt1}}>{fl(item.m.home)} {displayTeam(item.m.home)} x {displayTeam(item.m.away)} {fl(item.m.away)}</div><div style={{fontSize:10,color:T.txt3,marginTop:2}}>{fDate(item.m.dt)} - {item.m.ph==='Grupos'?'Grupo '+item.m.gr:item.m.ph}</div></div>
-          <div style={{fontSize:12,color:T.txt2}}><strong style={{color:T.txt1}}>Seu:</strong> {item.pred?item.pred.home+' x '+item.pred.away:'sem palpite'}</div>
-          <div style={{fontSize:12,color:T.txt2}}><strong style={{color:T.txt1}}>Real:</strong> {item.m.result.home} x {item.m.result.away}</div>
+          <div style={{fontSize:12,color:T.txt2}}><strong style={{color:T.txt1}}>Seu:</strong> {item.pred?formatScoreWithPk(item.m,item.pred):'sem palpite'}</div>
+          <div style={{fontSize:12,color:T.txt2}}><strong style={{color:T.txt1}}>Real:</strong> {formatScoreWithPk(item.m,item.m.result)}</div>
           <div style={{textAlign:'right'}}><span style={{display:'inline-block',fontSize:11,fontWeight:950,color:item.meta.color,background:item.meta.bg,borderRadius:999,padding:'5px 9px',whiteSpace:'nowrap'}}>{item.meta.short} - {item.pts??0} pts</span></div>
         </div>)}</div></details>:<div style={{fontSize:13,color:T.txt3,textAlign:'center',padding:'18px'}}>Seus acertos aparecem aqui quando algum resultado for registrado.</div>}
       </div>
@@ -1906,7 +1963,7 @@ function Bolao(){
         <div style={{display:'flex',flexDirection:'column',gap:14}}>
           <div className="lux-card" style={{background:T.card,border:'1px solid '+T.border,borderRadius:18,padding:'18px',boxShadow:shadow}}>
             <SectionTitle title="Registrar resultados" text="Resultados liberam pontos de placar no ranking."/>
-            <div style={{maxHeight:560,overflow:'auto',paddingRight:4}}>{matches.map(m=><div key={m.id} style={{display:'flex',alignItems:'center',padding:'9px 0',borderBottom:'1px solid '+T.border,flexWrap:'wrap',gap:8}}><span style={{fontSize:12,color:T.txt2,flex:1,minWidth:220}}><span style={{color:T.accent,fontWeight:900,marginRight:6}}>{m.ph==='Grupos'?'Grupo '+m.gr:m.ph}</span>{fl(m.home)} {m.home} × {m.away} {fl(m.away)}<span style={{color:T.txt3,marginLeft:6}}>{fDate(m.dt)}</span></span><div style={{display:'flex',alignItems:'center',gap:6}}><input style={{width:42,padding:'6px',textAlign:'center',borderRadius:8,border:'1.5px solid '+T.border,background:T.bg,color:T.txt1,fontSize:15,fontWeight:900,outline:'none'}} type="number" min="0" max="20" value={ri[m.id]?.home||''} onChange={e=>setRi(r=>({...r,[m.id]:{...r[m.id],home:e.target.value}}))}/><span style={{color:T.txt3,fontWeight:900}}>-</span><input style={{width:42,padding:'6px',textAlign:'center',borderRadius:8,border:'1.5px solid '+T.border,background:T.bg,color:T.txt1,fontSize:15,fontWeight:900,outline:'none'}} type="number" min="0" max="20" value={ri[m.id]?.away||''} onChange={e=>setRi(r=>({...r,[m.id]:{...r[m.id],away:e.target.value}}))}/><button className="btn-acc" style={{...btnAcc,padding:'6px 11px',fontSize:11}} onClick={()=>saveResult(m.id)}>OK</button></div></div>)}</div>
+            <div style={{maxHeight:560,overflow:'auto',paddingRight:4}}>{matches.map(m=><div key={m.id} style={{display:'flex',alignItems:'center',padding:'9px 0',borderBottom:'1px solid '+T.border,flexWrap:'wrap',gap:8}}><span style={{fontSize:12,color:T.txt2,flex:1,minWidth:220}}><span style={{color:T.accent,fontWeight:900,marginRight:6}}>{m.ph==='Grupos'?'Grupo '+m.gr:m.ph}</span>{fl(m.home)} {m.home} × {m.away} {fl(m.away)}<span style={{color:T.txt3,marginLeft:6}}>{fDate(m.dt)}</span></span><div style={{display:'flex',alignItems:'center',gap:6}}><input style={{width:42,padding:'6px',textAlign:'center',borderRadius:8,border:'1.5px solid '+T.border,background:T.bg,color:T.txt1,fontSize:15,fontWeight:900,outline:'none'}} type="number" min="0" max="20" value={ri[m.id]?.home||''} onChange={e=>setRi(r=>({...r,[m.id]:{...r[m.id],home:e.target.value}}))}/><span style={{color:T.txt3,fontWeight:900}}>-</span><input style={{width:42,padding:'6px',textAlign:'center',borderRadius:8,border:'1.5px solid '+T.border,background:T.bg,color:T.txt1,fontSize:15,fontWeight:900,outline:'none'}} type="number" min="0" max="20" value={ri[m.id]?.away||''} onChange={e=>setRi(r=>({...r,[m.id]:{...r[m.id],away:e.target.value}}))}/>{isKnockoutMatch(m)&&parseScore(ri[m.id]?.home)!==null&&parseScore(ri[m.id]?.away)!==null&&parseScore(ri[m.id]?.home)===parseScore(ri[m.id]?.away)&&<PenaltyButtons match={m} value={ri[m.id]?.pkWinner||''} onChange={side=>setRi(r=>({...r,[m.id]:{...r[m.id],pkWinner:side}}))}/>}<button className="btn-acc" style={{...btnAcc,padding:'6px 11px',fontSize:11}} onClick={()=>saveResult(m.id)}>OK</button></div></div>)}</div>
           </div>
           <div className="lux-card" style={{background:T.card,border:'1px solid '+T.border,borderRadius:18,padding:'18px',boxShadow:shadow}}>
             <SectionTitle title="Resumos por jogo" text="Depois de lancar o resultado, copie um resumo pronto para mandar no grupo."/>
